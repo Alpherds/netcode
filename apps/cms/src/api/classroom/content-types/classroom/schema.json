@@ -30,6 +30,11 @@
         "CLOSED",
         "ARCHIVED"
       ]
+    },
+    "instructor": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::profile.profile"
     }
   }
 }

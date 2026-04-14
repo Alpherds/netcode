@@ -40,6 +40,11 @@
     },
     "notes": {
       "type": "string"
+    },
+    "classroom": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::classroom.classroom"
     }
   }
 }

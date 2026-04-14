@@ -444,6 +444,10 @@ export interface ApiAttendanceAttendance extends Struct.CollectionTypeSchema {
     attendance_status: Schema.Attribute.Enumeration<
       ['PRESENT', 'LATE', 'ABSENT', 'LEFT']
     >;
+    class_session: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::class-session.class-session'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -457,6 +461,7 @@ export interface ApiAttendanceAttendance extends Struct.CollectionTypeSchema {
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
     source: Schema.Attribute.Enumeration<['MANUAL', 'AUTO', 'JITSI_EVENT']>;
+    student: Schema.Attribute.Relation<'manyToOne', 'api::profile.profile'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -475,6 +480,10 @@ export interface ApiClassSessionClassSession
     draftAndPublish: true;
   };
   attributes: {
+    classroom: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::classroom.classroom'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -517,6 +526,7 @@ export interface ApiClassroomClassroom extends Struct.CollectionTypeSchema {
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
     description: Schema.Attribute.Text;
+    instructor: Schema.Attribute.Relation<'manyToOne', 'api::profile.profile'>;
     locale: Schema.Attribute.String & Schema.Attribute.Private;
     localizations: Schema.Attribute.Relation<
       'oneToMany',
@@ -543,6 +553,10 @@ export interface ApiEnrollmentEnrollment extends Struct.CollectionTypeSchema {
     draftAndPublish: true;
   };
   attributes: {
+    classroom: Schema.Attribute.Relation<
+      'manyToOne',
+      'api::classroom.classroom'
+    >;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
@@ -556,6 +570,7 @@ export interface ApiEnrollmentEnrollment extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
+    student: Schema.Attribute.Relation<'manyToOne', 'api::profile.profile'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;

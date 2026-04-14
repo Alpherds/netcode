@@ -33,6 +33,16 @@
         "AUTO",
         "JITSI_EVENT"
       ]
-    }
+    },
+    "class_session": {
+  "type": "relation",
+  "relation": "manyToOne",
+  "target": "api::class-session.class-session"
+},
+"student": {
+  "type": "relation",
+  "relation": "manyToOne",
+  "target": "api::profile.profile"
+}
   }
 }

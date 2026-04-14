@@ -18,6 +18,16 @@
         "DROPPED",
         "COMPLETED"
       ]
+    },
+    "classroom": {
+  "type": "relation",
+  "relation": "manyToOne",
+  "target": "api::classroom.classroom"
+    },
+    "student": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::profile.profile"
     }
   }
 }
