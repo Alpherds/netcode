@@ -48,6 +48,9 @@
         "videos",
         "audios"
       ]
+    },
+        "auth_user_id": {
+      "type": "integer"
     }
   }
 }

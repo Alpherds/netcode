@@ -438,7 +438,7 @@ export interface ApiAttendanceAttendance extends Struct.CollectionTypeSchema {
     singularName: 'attendance';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     attendance_status: Schema.Attribute.Enumeration<
@@ -477,7 +477,7 @@ export interface ApiClassSessionClassSession
     singularName: 'class-session';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     classroom: Schema.Attribute.Relation<
@@ -498,7 +498,7 @@ export interface ApiClassSessionClassSession
     meeting_status: Schema.Attribute.Enumeration<
       ['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED']
     >;
-    notes: Schema.Attribute.String;
+    notes: Schema.Attribute.Text;
     publishedAt: Schema.Attribute.DateTime;
     room_name: Schema.Attribute.String;
     starts_at: Schema.Attribute.DateTime;
@@ -517,7 +517,7 @@ export interface ApiClassroomClassroom extends Struct.CollectionTypeSchema {
     singularName: 'classroom';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     class_status: Schema.Attribute.Enumeration<['OPEN', 'CLOSED', 'ARCHIVED']>;
@@ -550,7 +550,7 @@ export interface ApiEnrollmentEnrollment extends Struct.CollectionTypeSchema {
     singularName: 'enrollment';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     classroom: Schema.Attribute.Relation<
@@ -585,9 +585,10 @@ export interface ApiProfileProfile extends Struct.CollectionTypeSchema {
     singularName: 'profile';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
+    auth_user_id: Schema.Attribute.Integer;
     avatar: Schema.Attribute.Media<'images' | 'files' | 'videos' | 'audios'>;
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
