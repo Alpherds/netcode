@@ -1,0 +1,23 @@
+{
+  "kind": "collectionType",
+  "collectionName": "enrollments",
+  "info": {
+    "singularName": "enrollment",
+    "pluralName": "enrollments",
+    "displayName": "enrollment"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "enrollment_status": {
+      "type": "enumeration",
+      "enum": [
+        "ACTIVE",
+        "DROPPED",
+        "COMPLETED"
+      ]
+    }
+  }
+}

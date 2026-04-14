@@ -1,0 +1,53 @@
+{
+  "kind": "collectionType",
+  "collectionName": "profiles",
+  "info": {
+    "singularName": "profile",
+    "pluralName": "profiles",
+    "displayName": "profile"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "display_name": {
+      "type": "text"
+    },
+    "role_label": {
+      "type": "enumeration",
+      "enum": [
+        "STUDENT",
+        "INSTRUCTOR"
+      ]
+    },
+    "student_no": {
+      "type": "string"
+    },
+    "employee_no": {
+      "type": "string"
+    },
+    "program": {
+      "type": "string"
+    },
+    "year_level": {
+      "type": "integer"
+    },
+    "section": {
+      "type": "string"
+    },
+    "is_active": {
+      "type": "boolean"
+    },
+    "avatar": {
+      "type": "media",
+      "multiple": false,
+      "allowedTypes": [
+        "images",
+        "files",
+        "videos",
+        "audios"
+      ]
+    }
+  }
+}

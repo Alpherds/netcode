@@ -430,6 +430,174 @@ export interface AdminUser extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiAttendanceAttendance extends Struct.CollectionTypeSchema {
+  collectionName: 'attendances';
+  info: {
+    displayName: 'attendance';
+    pluralName: 'attendances';
+    singularName: 'attendance';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    attendance_status: Schema.Attribute.Enumeration<
+      ['PRESENT', 'LATE', 'ABSENT', 'LEFT']
+    >;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    join_time: Schema.Attribute.DateTime;
+    leave_time: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::attendance.attendance'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    source: Schema.Attribute.Enumeration<['MANUAL', 'AUTO', 'JITSI_EVENT']>;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiClassSessionClassSession
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'class_sessions';
+  info: {
+    displayName: 'class_session';
+    pluralName: 'class-sessions';
+    singularName: 'class-session';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    ends_at: Schema.Attribute.DateTime;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::class-session.class-session'
+    > &
+      Schema.Attribute.Private;
+    meeting_provider: Schema.Attribute.Enumeration<['JITSI']>;
+    meeting_status: Schema.Attribute.Enumeration<
+      ['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED']
+    >;
+    notes: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    room_name: Schema.Attribute.String;
+    starts_at: Schema.Attribute.DateTime;
+    title: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiClassroomClassroom extends Struct.CollectionTypeSchema {
+  collectionName: 'classrooms';
+  info: {
+    displayName: 'classroom';
+    pluralName: 'classrooms';
+    singularName: 'classroom';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    class_status: Schema.Attribute.Enumeration<['OPEN', 'CLOSED', 'ARCHIVED']>;
+    code: Schema.Attribute.UID;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    description: Schema.Attribute.Text;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::classroom.classroom'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    term: Schema.Attribute.String;
+    title: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiEnrollmentEnrollment extends Struct.CollectionTypeSchema {
+  collectionName: 'enrollments';
+  info: {
+    displayName: 'enrollment';
+    pluralName: 'enrollments';
+    singularName: 'enrollment';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    enrollment_status: Schema.Attribute.Enumeration<
+      ['ACTIVE', 'DROPPED', 'COMPLETED']
+    >;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::enrollment.enrollment'
+    > &
+      Schema.Attribute.Private;
+    publishedAt: Schema.Attribute.DateTime;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
+export interface ApiProfileProfile extends Struct.CollectionTypeSchema {
+  collectionName: 'profiles';
+  info: {
+    displayName: 'profile';
+    pluralName: 'profiles';
+    singularName: 'profile';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    avatar: Schema.Attribute.Media<'images' | 'files' | 'videos' | 'audios'>;
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    display_name: Schema.Attribute.Text;
+    employee_no: Schema.Attribute.String;
+    is_active: Schema.Attribute.Boolean;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::profile.profile'
+    > &
+      Schema.Attribute.Private;
+    program: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    role_label: Schema.Attribute.Enumeration<['STUDENT', 'INSTRUCTOR']>;
+    section: Schema.Attribute.String;
+    student_no: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    year_level: Schema.Attribute.Integer;
+  };
+}
+
 export interface PluginContentReleasesRelease
   extends Struct.CollectionTypeSchema {
   collectionName: 'strapi_releases';
@@ -941,6 +1109,11 @@ declare module '@strapi/strapi' {
       'admin::transfer-token': AdminTransferToken;
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
+      'api::attendance.attendance': ApiAttendanceAttendance;
+      'api::class-session.class-session': ApiClassSessionClassSession;
+      'api::classroom.classroom': ApiClassroomClassroom;
+      'api::enrollment.enrollment': ApiEnrollmentEnrollment;
+      'api::profile.profile': ApiProfileProfile;
       'plugin::content-releases.release': PluginContentReleasesRelease;
       'plugin::content-releases.release-action': PluginContentReleasesReleaseAction;
       'plugin::i18n.locale': PluginI18NLocale;

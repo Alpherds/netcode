@@ -1,0 +1,45 @@
+{
+  "kind": "collectionType",
+  "collectionName": "class_sessions",
+  "info": {
+    "singularName": "class-session",
+    "pluralName": "class-sessions",
+    "displayName": "class_session"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "title": {
+      "type": "string"
+    },
+    "starts_at": {
+      "type": "datetime"
+    },
+    "ends_at": {
+      "type": "datetime"
+    },
+    "room_name": {
+      "type": "string"
+    },
+    "meeting_provider": {
+      "type": "enumeration",
+      "enum": [
+        "JITSI"
+      ]
+    },
+    "meeting_status": {
+      "type": "enumeration",
+      "enum": [
+        "SCHEDULED",
+        "LIVE",
+        "ENDED",
+        "CANCELLED"
+      ]
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}
