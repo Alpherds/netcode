@@ -7,7 +7,7 @@
     "displayName": "class_session"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "pluginOptions": {},
   "attributes": {
@@ -39,7 +39,7 @@
       ]
     },
     "notes": {
-      "type": "string"
+      "type": "text"
     },
     "classroom": {
       "type": "relation",

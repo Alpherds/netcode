@@ -7,7 +7,7 @@
     "displayName": "profile"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "pluginOptions": {},
   "attributes": {
