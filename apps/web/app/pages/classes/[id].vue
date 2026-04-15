@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch, useRoute } from '#imports'
+import EnrollmentManager from '~/components/EnrollmentManager.vue'
 
 definePageMeta({
   middleware: 'auth',
@@ -70,6 +71,10 @@ const isInstructor = computed(
 )
 
 const isStudent = computed(() => roleLabel.value === 'STUDENT')
+
+const canManageEnrollments = computed(
+  () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
+)
 
 const safeSessions = computed(() => sessions.value ?? [])
 const liveSessions = computed(() =>
@@ -385,8 +390,13 @@ const sessionsErrorMessage = computed(() => {
         </p>
       </div>
     </section>
-
+      
     <section class="panel">
+      <EnrollmentManager
+  v-if="canManageEnrollments"
+  :classroom-id="classroomId"
+  :can-manage="canManageEnrollments"
+/>
       <div class="panel-header">
         <h2>Sessions</h2>
         <span class="count">{{ safeSessions.length }}</span>

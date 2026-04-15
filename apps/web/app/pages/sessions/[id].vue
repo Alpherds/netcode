@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { definePageMeta, navigateTo, useFetch, useRoute } from '#imports'
 import DailyMeetingEmbed from '~/components/DailyMeetingEmbed.vue'
+import SessionReadinessPanel from '~/components/SessionReadinessPanel.vue'
 
 definePageMeta({
   middleware: 'auth',
@@ -537,6 +538,12 @@ const sessionErrorMessage = computed(() => {
           This session has no room name yet.
         </div>
       </section>
+
+      <SessionReadinessPanel
+  v-if="isInstructor"
+  :session-id="sessionId"
+  :is-live="isLive"
+/>
 
       <section class="panel attendance-panel">
         <div class="panel-header attendance-header">
