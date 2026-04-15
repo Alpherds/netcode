@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch, useRoute } from '#imports'
 
 definePageMeta({
@@ -26,6 +26,16 @@ type SessionItem = {
   notes?: string | null
 }
 
+type CreateSessionForm = {
+  title: string
+  starts_at: string
+  ends_at: string
+  room_name: string
+  meeting_provider: 'JITSI'
+  meeting_status: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
+  notes: string
+}
+
 const route = useRoute()
 const classroomId = route.params.id as string
 
@@ -44,6 +54,80 @@ const {
 } = await useFetch<SessionItem[]>(`/api/classrooms/${classroomId}/sessions`)
 
 const safeSessions = computed(() => sessions.value ?? [])
+
+const showCreateForm = ref(false)
+const isSubmitting = ref(false)
+const formError = ref('')
+const formSuccess = ref('')
+
+const form = ref<CreateSessionForm>({
+  title: '',
+  starts_at: '',
+  ends_at: '',
+  room_name: '',
+  meeting_provider: 'JITSI',
+  meeting_status: 'SCHEDULED',
+  notes: '',
+})
+
+const resetForm = () => {
+  form.value = {
+    title: '',
+    starts_at: '',
+    ends_at: '',
+    room_name: '',
+    meeting_provider: 'JITSI',
+    meeting_status: 'SCHEDULED',
+    notes: '',
+  }
+
+  formError.value = ''
+  formSuccess.value = ''
+}
+
+const toggleCreateForm = () => {
+  showCreateForm.value = !showCreateForm.value
+
+  if (!showCreateForm.value) {
+    resetForm()
+  }
+}
+
+const submitSession = async () => {
+  formError.value = ''
+  formSuccess.value = ''
+
+  if (!form.value.title.trim()) {
+    formError.value = 'Session title is required.'
+    return
+  }
+
+  if (!form.value.starts_at || !form.value.ends_at) {
+    formError.value = 'Start and end date/time are required.'
+    return
+  }
+
+  isSubmitting.value = true
+
+  try {
+    await $fetch(`/api/classrooms/${classroomId}/sessions`, {
+    method: 'POST' as 'POST',
+    body: form.value,
+    })
+
+    formSuccess.value = 'Session created successfully.'
+    await refreshSessions()
+    resetForm()
+    showCreateForm.value = false
+  } catch (error: any) {
+    formError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to create session.'
+  } finally {
+    isSubmitting.value = false
+  }
+}
 
 const goBack = async () => {
   await navigateTo('/')
@@ -85,8 +169,84 @@ const badgeClass = (status?: string | null) => {
         </p>
       </div>
 
-      <button class="btn" @click="refreshAll">Refresh</button>
+      <div class="hero-actions">
+        <button class="btn btn-secondary" @click="toggleCreateForm">
+          {{ showCreateForm ? 'Close Form' : 'Create Session' }}
+        </button>
+        <button class="btn" @click="refreshAll">Refresh</button>
+      </div>
     </header>
+
+    <section v-if="showCreateForm" class="panel">
+      <div class="panel-header">
+        <h2>Create Session</h2>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group full">
+          <label>Session Title</label>
+          <input v-model="form.title" type="text" placeholder="Enter session title" />
+        </div>
+
+        <div class="form-group">
+          <label>Start Date & Time</label>
+          <input v-model="form.starts_at" type="datetime-local" />
+        </div>
+
+        <div class="form-group">
+          <label>End Date & Time</label>
+          <input v-model="form.ends_at" type="datetime-local" />
+        </div>
+
+        <div class="form-group">
+          <label>Room Name</label>
+          <input v-model="form.room_name" type="text" placeholder="Optional room name" />
+        </div>
+
+        <div class="form-group">
+          <label>Meeting Provider</label>
+          <select v-model="form.meeting_provider">
+            <option value="JITSI">JITSI</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Meeting Status</label>
+          <select v-model="form.meeting_status">
+            <option value="SCHEDULED">SCHEDULED</option>
+            <option value="LIVE">LIVE</option>
+            <option value="ENDED">ENDED</option>
+            <option value="CANCELLED">CANCELLED</option>
+          </select>
+        </div>
+
+        <div class="form-group full">
+          <label>Notes</label>
+          <textarea
+            v-model="form.notes"
+            rows="4"
+            placeholder="Optional notes"
+          />
+        </div>
+      </div>
+
+      <p v-if="formError" class="form-message form-error">
+        {{ formError }}
+      </p>
+
+      <p v-if="formSuccess" class="form-message form-success">
+        {{ formSuccess }}
+      </p>
+
+      <div class="form-actions">
+        <button class="btn btn-light" @click="resetForm" :disabled="isSubmitting">
+          Reset
+        </button>
+        <button class="btn btn-primary" @click="submitSession" :disabled="isSubmitting">
+          {{ isSubmitting ? 'Creating...' : 'Save Session' }}
+        </button>
+      </div>
+    </section>
 
     <section v-if="classroomPending" class="panel">Loading classroom...</section>
     <section v-else-if="classroomError" class="panel error">Failed to load classroom.</section>
@@ -166,6 +326,12 @@ const badgeClass = (status?: string | null) => {
   color: #6b7280;
 }
 
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .back-btn {
   border: 0;
   background: transparent;
@@ -179,10 +345,28 @@ const badgeClass = (status?: string | null) => {
   border: 0;
   border-radius: 12px;
   padding: 10px 16px;
-  background: #111827;
-  color: white;
   font-weight: 600;
   cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #111827;
+  color: white;
+}
+
+.btn-secondary {
+  background: #4f46e5;
+  color: white;
+}
+
+.btn-light {
+  background: #e5e7eb;
+  color: #111827;
 }
 
 .panel {
@@ -261,6 +445,66 @@ const badgeClass = (status?: string | null) => {
   font-weight: 700;
 }
 
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group.full {
+  grid-column: 1 / -1;
+}
+
+.form-group label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font: inherit;
+  background: #fff;
+  color: #111827;
+}
+
+.form-message {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.form-error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.form-success {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 .session-list {
   display: grid;
   gap: 16px;
@@ -329,6 +573,7 @@ const badgeClass = (status?: string | null) => {
     flex-direction: column;
   }
 
+  .form-grid,
   .session-meta {
     grid-template-columns: 1fr;
   }
