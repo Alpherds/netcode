@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch } from '#imports'
 import { useAuth } from '~/composables/useAuth'
 
@@ -29,6 +29,14 @@ type Classroom = {
   class_status?: 'OPEN' | 'CLOSED' | 'ARCHIVED' | string | null
 }
 
+type ClassroomForm = {
+  title: string
+  code: string
+  description: string
+  term: string
+  class_status: 'OPEN' | 'CLOSED' | 'ARCHIVED'
+}
+
 const { user, logout } = useAuth()
 
 const {
@@ -56,6 +64,11 @@ const displayName = computed(() => {
 
 const roleLabel = computed(() => safeProfile.value?.role_label || 'Authenticated User')
 
+const canCreateClassroom = computed(() => {
+  const role = String(safeProfile.value?.role_label || '').toUpperCase()
+  return role === 'INSTRUCTOR' || role === 'ADMIN'
+})
+
 const idLabel = computed(() => {
   if (safeProfile.value?.employee_no) return `Employee No: ${safeProfile.value.employee_no}`
   if (safeProfile.value?.student_no) return `Student No: ${safeProfile.value.student_no}`
@@ -69,6 +82,90 @@ const activeClassesCount = computed(() =>
 const archivedClassesCount = computed(() =>
   safeClassrooms.value.filter(c => c.class_status === 'ARCHIVED').length
 )
+
+const showCreateClassroom = ref(false)
+const isCreatingClassroom = ref(false)
+const classroomFormError = ref('')
+const classroomFormSuccess = ref('')
+
+const classroomForm = ref<ClassroomForm>({
+  title: '',
+  code: '',
+  description: '',
+  term: '',
+  class_status: 'OPEN',
+})
+
+const resetClassroomForm = () => {
+  classroomForm.value = {
+    title: '',
+    code: '',
+    description: '',
+    term: '',
+    class_status: 'OPEN',
+  }
+  classroomFormError.value = ''
+  classroomFormSuccess.value = ''
+}
+
+const toggleCreateClassroom = () => {
+  if (!canCreateClassroom.value) return
+
+  showCreateClassroom.value = !showCreateClassroom.value
+
+  if (!showCreateClassroom.value) {
+    resetClassroomForm()
+  }
+}
+
+const submitCreateClassroom = async () => {
+  classroomFormError.value = ''
+  classroomFormSuccess.value = ''
+
+  if (!classroomForm.value.title.trim()) {
+    classroomFormError.value = 'Classroom title is required.'
+    return
+  }
+
+  if (!classroomForm.value.code.trim()) {
+    classroomFormError.value = 'Classroom code is required.'
+    return
+  }
+
+  if (!classroomForm.value.term.trim()) {
+    classroomFormError.value = 'Term is required.'
+    return
+  }
+
+  isCreatingClassroom.value = true
+
+  try {
+   const createClassroomUrl: string = '/api/classrooms'
+
+await $fetch(createClassroomUrl, {
+  method: 'POST',
+  body: {
+    title: classroomForm.value.title,
+    code: classroomForm.value.code,
+    description: classroomForm.value.description,
+    term: classroomForm.value.term,
+    class_status: classroomForm.value.class_status,
+  },
+})
+
+    classroomFormSuccess.value = 'Classroom created successfully.'
+    await refreshClassrooms()
+    resetClassroomForm()
+    showCreateClassroom.value = false
+  } catch (error: any) {
+    classroomFormError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to create classroom.'
+  } finally {
+    isCreatingClassroom.value = false
+  }
+}
 
 const doLogout = async () => {
   await logout()
@@ -204,8 +301,99 @@ const openClassroom = async (id: number) => {
       <article class="panel classes-panel">
         <div class="panel-header">
           <h2>My Classrooms</h2>
-          <span class="panel-count">{{ safeClassrooms.length }}</span>
+
+          <div class="classes-header-actions">
+            <span class="panel-count">{{ safeClassrooms.length }}</span>
+
+            <button
+              v-if="canCreateClassroom"
+              class="btn btn-primary"
+              @click="toggleCreateClassroom"
+            >
+              {{ showCreateClassroom ? 'Close Form' : 'Create Classroom' }}
+            </button>
+          </div>
         </div>
+
+        <section
+          v-if="showCreateClassroom && canCreateClassroom"
+          class="create-classroom-box"
+        >
+          <h3>Create Classroom</h3>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label>Title</label>
+              <input
+                v-model="classroomForm.title"
+                type="text"
+                placeholder="Enter classroom title"
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Code</label>
+              <input
+                v-model="classroomForm.code"
+                type="text"
+                placeholder="Enter classroom code"
+              />
+            </div>
+
+            <div class="form-group full">
+              <label>Description</label>
+              <textarea
+                v-model="classroomForm.description"
+                rows="4"
+                placeholder="Enter classroom description"
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Term</label>
+              <input
+                v-model="classroomForm.term"
+                type="text"
+                placeholder="e.g. 1st Semester AY 2026-2027"
+              />
+            </div>
+
+            <div class="form-group">
+              <label>Status</label>
+              <select v-model="classroomForm.class_status">
+                <option value="OPEN">OPEN</option>
+                <option value="CLOSED">CLOSED</option>
+                <option value="ARCHIVED">ARCHIVED</option>
+              </select>
+            </div>
+          </div>
+
+          <p v-if="classroomFormError" class="form-message form-error">
+            {{ classroomFormError }}
+          </p>
+
+          <p v-if="classroomFormSuccess" class="form-message form-success">
+            {{ classroomFormSuccess }}
+          </p>
+
+          <div class="form-actions">
+            <button
+              class="btn btn-light"
+              :disabled="isCreatingClassroom"
+              @click="resetClassroomForm"
+            >
+              Reset
+            </button>
+
+            <button
+              class="btn btn-primary"
+              :disabled="isCreatingClassroom"
+              @click="submitCreateClassroom"
+            >
+              {{ isCreatingClassroom ? 'Creating...' : 'Save Classroom' }}
+            </button>
+          </div>
+        </section>
 
         <div v-if="classroomsPending" class="empty-state">
           Loading classrooms...
@@ -220,12 +408,12 @@ const openClassroom = async (id: number) => {
         </div>
 
         <div v-else class="classroom-grid">
-              <article
-                v-for="classroom in safeClassrooms"
-                :key="classroom.id"
-                class="classroom-card clickable"
-                @click="openClassroom(classroom.id)"
-              >
+          <article
+            v-for="classroom in safeClassrooms"
+            :key="classroom.id"
+            class="classroom-card clickable"
+            @click="openClassroom(classroom.id)"
+          >
             <div class="classroom-top">
               <div>
                 <h3>{{ classroom.title || 'Untitled Classroom' }}</h3>
@@ -317,6 +505,11 @@ const openClassroom = async (id: number) => {
   transform: translateY(-1px);
 }
 
+.btn-primary {
+  background: #4f46e5;
+  color: #ffffff;
+}
+
 .btn-secondary {
   background: #111827;
   color: #ffffff;
@@ -325,6 +518,11 @@ const openClassroom = async (id: number) => {
 .btn-danger {
   background: #dc2626;
   color: #ffffff;
+}
+
+.btn-light {
+  background: #e5e7eb;
+  color: #111827;
 }
 
 .stats-grid {
@@ -386,6 +584,13 @@ const openClassroom = async (id: number) => {
   font-size: 22px;
 }
 
+.classes-header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .panel-count {
   min-width: 36px;
   height: 36px;
@@ -396,6 +601,79 @@ const openClassroom = async (id: number) => {
   background: #eef2ff;
   color: #4338ca;
   font-weight: 700;
+}
+
+.create-classroom-box {
+  border: 1px solid #e5e7eb;
+  background: #fafcff;
+  border-radius: 18px;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.create-classroom-box h3 {
+  margin: 0 0 16px;
+  font-size: 20px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-group.full {
+  grid-column: 1 / -1;
+}
+
+.form-group label {
+  font-size: 14px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font: inherit;
+  background: #fff;
+  color: #111827;
+}
+
+.form-message {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.form-error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.form-success {
+  background: #ecfdf5;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .status-pill {
@@ -592,12 +870,21 @@ const openClassroom = async (id: number) => {
 
   .stats-grid,
   .info-grid,
-  .classroom-grid {
+  .classroom-grid,
+  .form-grid {
     grid-template-columns: 1fr;
   }
 
-  .classroom-top {
+  .classroom-top,
+  .panel-header,
+  .classes-header-actions {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .form-actions .btn,
+  .classes-header-actions .btn {
+    width: 100%;
   }
 }
 </style>

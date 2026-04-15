@@ -1,11 +1,17 @@
-import { createError, getCookie, getRouterParam, readBody } from 'h3'
+import { createError, getCookie, readBody } from 'h3'
 
-type StrapiCollectionResponse<T> = { data: T[] }
-type StrapiSingleResponse<T> = { data: T }
+type StrapiCollectionResponse<T> = {
+  data: T[]
+}
+
+type StrapiSingleResponse<T> = {
+  data: T
+}
 
 type StrapiMe = {
   id: number
   username: string
+  email?: string
 }
 
 type ProfileRecord = {
@@ -15,95 +21,129 @@ type ProfileRecord = {
   [key: string]: unknown
 }
 
+type ClassroomBody = {
+  title?: string
+  code?: string
+  description?: string
+  term?: string
+  class_status?: 'OPEN' | 'CLOSED' | 'ARCHIVED'
+}
+
 type ClassroomRecord = {
   id: number
-  [key: string]: unknown
-}
-
-type EnrollmentRecord = {
-  id: number
   documentId?: string
-  enrollment_status?: string | null
+  title?: string | null
+  code?: string | null
+  description?: string | null
+  term?: string | null
+  class_status?: string | null
   [key: string]: unknown
 }
 
-type Body = {
-  studentId?: number
-}
-
-export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
+export default defineEventHandler(async (event): Promise<ClassroomRecord> => {
   const config = useRuntimeConfig(event)
   const jwt = getCookie(event, 'netcode_jwt')
-  const classroomId = getRouterParam(event, 'id')
-  const body = await readBody<Body>(event)
+  const body = await readBody<ClassroomBody>(event)
 
-  if (!jwt) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
-  if (!classroomId) throw createError({ statusCode: 400, statusMessage: 'Classroom id is required' })
-  if (!body?.studentId) throw createError({ statusCode: 400, statusMessage: 'Student id is required' })
+  if (!jwt) {
+    throw createError({
+      statusCode: 401,
+      statusMessage: 'Unauthorized',
+    })
+  }
+
+  const title = String(body?.title || '').trim()
+  const code = String(body?.code || '').trim()
+  const description = String(body?.description || '').trim()
+  const term = String(body?.term || '').trim()
+  const classStatus = body?.class_status || 'OPEN'
+
+  if (!title) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Classroom title is required',
+    })
+  }
+
+  if (!code) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Classroom code is required',
+    })
+  }
+
+  if (!term) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Term is required',
+    })
+  }
+
+  const allowedStatuses = ['OPEN', 'CLOSED', 'ARCHIVED']
+  if (!allowedStatuses.includes(classStatus)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid classroom status',
+    })
+  }
 
   const strapiUrl = String(config.public.strapiUrl || '').replace(/\/$/, '')
-  const headers = { Authorization: `Bearer ${jwt}` }
+  const headers = {
+    Authorization: `Bearer ${jwt}`,
+  }
 
-  const me = await $fetch<StrapiMe>(`${strapiUrl}/api/users/me`, { headers })
+  const me = await $fetch<StrapiMe>(`${strapiUrl}/api/users/me`, {
+    headers,
+  })
 
-  const profileRes = await $fetch<StrapiCollectionResponse<ProfileRecord>>(
+  const profileResponse = await $fetch<StrapiCollectionResponse<ProfileRecord>>(
     `${strapiUrl}/api/profiles?filters[auth_user_id][$eq]=${me.id}`,
     { headers }
   )
 
-  const profile = profileRes.data?.[0]
-  if (!profile) throw createError({ statusCode: 404, statusMessage: 'Profile not found' })
+  const profile = profileResponse.data?.[0]
 
-  const role = String(profile.role_label || '').toUpperCase()
-  if (role !== 'ADMIN' && role !== 'INSTRUCTOR') {
-    throw createError({ statusCode: 403, statusMessage: 'You do not have access to enroll students' })
+  if (!profile) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Profile not found',
+    })
   }
 
-  if (role === 'INSTRUCTOR') {
-    const classroomRes = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
-      `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&filters[instructor][id][$eq]=${profile.id}`,
-      { headers }
-    )
+  const roleLabel = String(profile.role_label || '').toUpperCase()
 
-    if (!classroomRes.data?.[0]) {
-      throw createError({ statusCode: 403, statusMessage: 'You do not own this classroom' })
-    }
+  if (roleLabel !== 'INSTRUCTOR' && roleLabel !== 'ADMIN') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'You do not have permission to create a classroom',
+    })
   }
 
-  const existingRes = await $fetch<StrapiCollectionResponse<EnrollmentRecord>>(
-    `${strapiUrl}/api/enrollments?filters[classroom][id][$eq]=${classroomId}&filters[student][id][$eq]=${body.studentId}`,
+  const duplicateResponse = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
+    `${strapiUrl}/api/classrooms?filters[code][$eq]=${encodeURIComponent(code)}`,
     { headers }
   )
 
-  const existing = existingRes.data?.[0]
-
-  if (existing?.documentId) {
-    const updated = await $fetch<StrapiSingleResponse<EnrollmentRecord>>(
-      `${strapiUrl}/api/enrollments/${existing.documentId}`,
-      {
-        method: 'PUT',
-        headers,
-        body: {
-          data: {
-            enrollment_status: 'ACTIVE',
-          },
-        },
-      }
-    )
-
-    return updated.data
+  if (duplicateResponse.data?.length) {
+    throw createError({
+      statusCode: 409,
+      statusMessage: 'A classroom with this code already exists',
+    })
   }
 
-  const created = await $fetch<StrapiSingleResponse<EnrollmentRecord>>(
-    `${strapiUrl}/api/enrollments`,
+  const created = await $fetch<StrapiSingleResponse<ClassroomRecord>>(
+    `${strapiUrl}/api/classrooms`,
     {
       method: 'POST',
       headers,
       body: {
         data: {
-          enrollment_status: 'ACTIVE',
-          classroom: Number(classroomId),
-          student: body.studentId,
+          title,
+          code,
+          description,
+          term,
+          class_status: classStatus,
+          instructor: profile.id,
         },
       },
     }
