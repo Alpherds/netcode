@@ -89,6 +89,7 @@ const attendanceLoading = ref(false)
 const attendanceError = ref('')
 
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+let isPollingAttendance = false
 
 const roleLabel = computed(() =>
   String(profile.value?.role_label || '').toUpperCase()
@@ -99,6 +100,8 @@ const isInstructor = computed(
 )
 
 const isStudent = computed(() => roleLabel.value === 'STUDENT')
+
+const studentAttendance = computed(() => attendance.value[0] || null)
 
 const refreshSession = async () => {
   await refresh()
@@ -169,7 +172,7 @@ const canEnterMeeting = computed(() => {
 const accessTitle = computed(() => {
   if (isScheduled.value) {
     return isStudent.value
-      ? 'Wait for the instructor to start the session'
+      ? 'Waiting for the instructor'
       : 'Session has not started yet'
   }
 
@@ -191,7 +194,7 @@ const accessTitle = computed(() => {
 const accessMessage = computed(() => {
   if (isScheduled.value) {
     return isStudent.value
-      ? 'Students can only enter after the instructor starts the session.'
+      ? 'Your instructor has not started this session yet. Come back once it becomes live.'
       : 'Start the session to allow students to enter the meeting room.'
   }
 
@@ -206,7 +209,9 @@ const accessMessage = computed(() => {
   }
 
   if (isLive.value) {
-    return 'You can enter the meeting room when ready.'
+    return isStudent.value
+      ? 'This session is live. You can enter when ready.'
+      : 'The meeting room is active and ready for participants.'
   }
 
   return 'This meeting is unavailable right now.'
@@ -339,11 +344,9 @@ const onMeetingJoined = async () => {
 
 const onMeetingClosed = async () => {
   await markLeaveAttendance()
-  await goBack()
+  showMeeting.value = false
+  joinInfo.value = null
 }
-
-
-let isPollingAttendance = false
 
 const startAutoRefresh = () => {
   if (autoRefreshTimer) return
@@ -382,6 +385,18 @@ watch(
 
 onBeforeUnmount(() => {
   stopAutoRefresh()
+})
+
+const sessionErrorMessage = computed(() => {
+  const err: any = error.value
+
+  if (err?.statusCode === 403) {
+    return isStudent.value
+      ? 'You are not allowed to access this session.'
+      : 'You do not have access to this session.'
+  }
+
+  return 'Failed to load session.'
 })
 </script>
 
@@ -422,7 +437,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section v-else-if="error" class="panel error">
-      Failed to load session.
+      {{ sessionErrorMessage }}
     </section>
 
     <template v-else>
@@ -528,11 +543,15 @@ onBeforeUnmount(() => {
           <div>
             <h2>Attendance</h2>
             <p class="attendance-subtitle">
-              Live attendance updates every 10 seconds while the session is active.
+              {{
+                isInstructor
+                  ? 'Live attendance updates every 10 seconds while the session is active.'
+                  : 'Your attendance is recorded automatically when you join and leave the session.'
+              }}
             </p>
           </div>
 
-          <div class="attendance-chips">
+          <div v-if="isInstructor" class="attendance-chips">
             <span class="room-chip">Total {{ attendanceCount }}</span>
             <span class="attendance-chip present-chip">Present {{ presentCount }}</span>
             <span class="attendance-chip left-chip">Left {{ leftCount }}</span>
@@ -575,8 +594,25 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
+        <div v-else-if="studentAttendance" class="student-attendance-card">
+          <div class="student-attendance-item">
+            <span class="attendance-label">Joined</span>
+            <strong>{{ formatDateTime(studentAttendance.join_time) }}</strong>
+          </div>
+
+          <div class="student-attendance-item">
+            <span class="attendance-label">Left</span>
+            <strong>{{ formatDateTime(studentAttendance.leave_time) }}</strong>
+          </div>
+
+          <div class="student-attendance-item">
+            <span class="attendance-label">Status</span>
+            <strong>{{ studentAttendance.attendance_status || '—' }}</strong>
+          </div>
+        </div>
+
         <div v-else class="attendance-empty">
-          Attendance details are visible to the instructor.
+          Your attendance record will appear here after you join the session.
         </div>
       </section>
     </template>
@@ -849,6 +885,19 @@ onBeforeUnmount(() => {
   color: #6b7280;
 }
 
+.student-attendance-card {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.student-attendance-item {
+  border: 1px solid #eef2f7;
+  background: #f9fbff;
+  border-radius: 16px;
+  padding: 16px;
+}
+
 .error {
   color: #b91c1c;
   border-color: #fecaca;
@@ -864,7 +913,8 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
-  .summary-grid {
+  .summary-grid,
+  .student-attendance-card {
     grid-template-columns: 1fr;
   }
 

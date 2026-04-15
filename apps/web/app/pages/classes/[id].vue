@@ -15,6 +15,12 @@ type Classroom = {
   class_status?: string | null
 }
 
+type ProfileItem = {
+  id: number
+  display_name?: string | null
+  role_label?: string | null
+}
+
 type SessionItem = {
   id: number
   title?: string | null
@@ -22,7 +28,7 @@ type SessionItem = {
   ends_at?: string | null
   room_name?: string | null
   meeting_provider?: string | null
-  meeting_status?: string | null
+  meeting_status?: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED' | string | null
   notes?: string | null
 }
 
@@ -39,6 +45,8 @@ type CreateSessionForm = {
 const route = useRoute()
 const classroomId = route.params.id as string
 
+const { data: profile } = await useFetch<ProfileItem>('/api/profile')
+
 const {
   data: classroom,
   pending: classroomPending,
@@ -53,7 +61,27 @@ const {
   refresh: refreshSessions,
 } = await useFetch<SessionItem[]>(`/api/classrooms/${classroomId}/sessions`)
 
+const roleLabel = computed(() =>
+  String(profile.value?.role_label || '').toUpperCase()
+)
+
+const isInstructor = computed(
+  () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
+)
+
+const isStudent = computed(() => roleLabel.value === 'STUDENT')
+
 const safeSessions = computed(() => sessions.value ?? [])
+const liveSessions = computed(() =>
+  safeSessions.value.filter(
+    (item) => String(item.meeting_status || '').toUpperCase() === 'LIVE'
+  )
+)
+const upcomingSessions = computed(() =>
+  safeSessions.value.filter(
+    (item) => String(item.meeting_status || '').toUpperCase() === 'SCHEDULED'
+  )
+)
 
 const showCreateForm = ref(false)
 const isSubmitting = ref(false)
@@ -86,6 +114,8 @@ const resetForm = () => {
 }
 
 const toggleCreateForm = () => {
+  if (!isInstructor.value) return
+
   showCreateForm.value = !showCreateForm.value
 
   if (!showCreateForm.value) {
@@ -157,9 +187,63 @@ const badgeClass = (status?: string | null) => {
   }
 }
 
+const statusLabel = (status?: string | null) => {
+  switch (status) {
+    case 'SCHEDULED':
+      return 'Waiting to start'
+    case 'LIVE':
+      return 'Live now'
+    case 'ENDED':
+      return 'Ended'
+    case 'CANCELLED':
+      return 'Cancelled'
+    default:
+      return status || 'Unknown'
+  }
+}
+
+const sessionHint = (status?: string | null) => {
+  switch (status) {
+    case 'SCHEDULED':
+      return 'Students can enter after the instructor starts the session.'
+    case 'LIVE':
+      return 'This session is active and ready to enter.'
+    case 'ENDED':
+      return 'This session is already finished.'
+    case 'CANCELLED':
+      return 'This session is unavailable.'
+    default:
+      return 'Session status unavailable.'
+  }
+}
+
 const openSession = async (id: number) => {
   await navigateTo(`/sessions/${id}`)
 }
+
+const classroomErrorMessage = computed(() => {
+  const err: any = classroomError.value
+
+  if (err?.statusCode === 403) {
+    return isStudent.value
+      ? 'You are not enrolled in this classroom.'
+      : 'You do not have access to this classroom.'
+  }
+
+  return 'Failed to load classroom.'
+})
+
+const sessionsErrorMessage = computed(() => {
+  const err: any = sessionsError.value
+
+  if (err?.statusCode === 403) {
+    return isStudent.value
+      ? 'You are not allowed to view sessions for this classroom.'
+      : 'You do not have access to this session list.'
+  }
+
+  return 'Failed to load sessions.'
+})
 </script>
 
 <template>
@@ -174,14 +258,19 @@ const openSession = async (id: number) => {
       </div>
 
       <div class="hero-actions">
-        <button class="btn btn-secondary" @click="toggleCreateForm">
+        <button
+          v-if="isInstructor"
+          class="btn btn-secondary"
+          @click="toggleCreateForm"
+        >
           {{ showCreateForm ? 'Close Form' : 'Create Session' }}
         </button>
+
         <button class="btn" @click="refreshAll">Refresh</button>
       </div>
     </header>
 
-    <section v-if="showCreateForm" class="panel">
+    <section v-if="showCreateForm && isInstructor" class="panel">
       <div class="panel-header">
         <h2>Create Session</h2>
       </div>
@@ -215,12 +304,12 @@ const openSession = async (id: number) => {
           />
         </div>
 
-      <div class="form-group">
-        <label>Meeting Provider</label>
-        <select v-model="form.meeting_provider">
-          <option value="DAILY">DAILY</option>
-        </select>
-      </div>
+        <div class="form-group">
+          <label>Meeting Provider</label>
+          <select v-model="form.meeting_provider">
+            <option value="DAILY">DAILY</option>
+          </select>
+        </div>
 
         <div class="form-group">
           <label>Meeting Status</label>
@@ -251,10 +340,14 @@ const openSession = async (id: number) => {
       </p>
 
       <div class="form-actions">
-        <button class="btn btn-light" @click="resetForm" :disabled="isSubmitting">
+        <button class="btn btn-light" :disabled="isSubmitting" @click="resetForm">
           Reset
         </button>
-        <button class="btn btn-primary" @click="submitSession" :disabled="isSubmitting">
+        <button
+          class="btn btn-primary"
+          :disabled="isSubmitting"
+          @click="submitSession"
+        >
           {{ isSubmitting ? 'Creating...' : 'Save Session' }}
         </button>
       </div>
@@ -265,7 +358,7 @@ const openSession = async (id: number) => {
     </section>
 
     <section v-else-if="classroomError" class="panel error">
-      Failed to load classroom.
+      {{ classroomErrorMessage }}
     </section>
 
     <section v-else class="panel">
@@ -276,6 +369,21 @@ const openSession = async (id: number) => {
         </div>
         <span class="status-pill">{{ classroom?.class_status || 'UNKNOWN' }}</span>
       </div>
+
+      <div v-if="isStudent" class="student-callout">
+        <strong>Student View</strong>
+        <p>
+          You can only enter sessions that are currently marked as
+          <strong>LIVE</strong>.
+        </p>
+      </div>
+
+      <div v-else class="student-callout instructor-callout">
+        <strong>Instructor View</strong>
+        <p>
+          Start a session to allow enrolled students to enter the meeting room.
+        </p>
+      </div>
     </section>
 
     <section class="panel">
@@ -284,16 +392,32 @@ const openSession = async (id: number) => {
         <span class="count">{{ safeSessions.length }}</span>
       </div>
 
+      <div v-if="isStudent" class="session-summary-strip">
+        <div class="summary-mini-card live-mini">
+          <span>Live</span>
+          <strong>{{ liveSessions.length }}</strong>
+        </div>
+
+        <div class="summary-mini-card scheduled-mini">
+          <span>Scheduled</span>
+          <strong>{{ upcomingSessions.length }}</strong>
+        </div>
+      </div>
+
       <div v-if="sessionsPending" class="empty-state">
         Loading sessions...
       </div>
 
       <div v-else-if="sessionsError" class="empty-state error">
-        Failed to load sessions.
+        {{ sessionsErrorMessage }}
       </div>
 
       <div v-else-if="safeSessions.length === 0" class="empty-state">
-        No sessions yet.
+        {{
+          isStudent
+            ? 'No sessions are available for this classroom yet.'
+            : 'No sessions yet. Create the first session to get started.'
+        }}
       </div>
 
       <div v-else class="session-list">
@@ -309,7 +433,7 @@ const openSession = async (id: number) => {
             </div>
 
             <span :class="badgeClass(session.meeting_status)">
-              {{ session.meeting_status || 'UNKNOWN' }}
+              {{ statusLabel(session.meeting_status) }}
             </span>
           </div>
 
@@ -320,10 +444,18 @@ const openSession = async (id: number) => {
           </div>
 
           <p class="notes">{{ session.notes || 'No notes provided.' }}</p>
+          <p class="session-hint">{{ sessionHint(session.meeting_status) }}</p>
 
           <div class="session-actions">
-            <button class="btn btn-primary" @click="openSession(session.id)">
-              Open Session
+            <button
+              class="btn btn-primary"
+              @click="openSession(session.id)"
+            >
+              {{
+                String(session.meeting_status || '').toUpperCase() === 'LIVE'
+                  ? 'Enter Session'
+                  : 'View Session'
+              }}
             </button>
           </div>
         </article>
@@ -537,6 +669,73 @@ const openSession = async (id: number) => {
   margin-top: 18px;
 }
 
+.student-callout {
+  margin-top: 18px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.student-callout strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #1d4ed8;
+}
+
+.student-callout p {
+  margin: 0;
+  color: #374151;
+}
+
+.instructor-callout {
+  border-color: #dcfce7;
+  background: #f0fdf4;
+}
+
+.instructor-callout strong {
+  color: #166534;
+}
+
+.session-summary-strip {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.summary-mini-card {
+  min-width: 130px;
+  border-radius: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.summary-mini-card span {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.summary-mini-card strong {
+  font-size: 24px;
+}
+
+.live-mini {
+  background: #ecfdf5;
+  border-color: #bbf7d0;
+}
+
+.scheduled-mini {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
 .session-list {
   display: grid;
   gap: 16px;
@@ -579,6 +778,12 @@ const openSession = async (id: number) => {
   color: #374151;
 }
 
+.session-hint {
+  margin: 12px 0 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
 .session-actions {
   display: flex;
   justify-content: flex-end;
@@ -614,6 +819,14 @@ const openSession = async (id: number) => {
   .form-grid,
   .session-meta {
     grid-template-columns: 1fr;
+  }
+
+  .session-actions {
+    justify-content: stretch;
+  }
+
+  .session-actions .btn {
+    width: 100%;
   }
 }
 </style>
