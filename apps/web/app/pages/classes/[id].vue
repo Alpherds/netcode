@@ -31,7 +31,7 @@ type CreateSessionForm = {
   starts_at: string
   ends_at: string
   room_name: string
-  meeting_provider: 'JITSI'
+  meeting_provider: 'DAILY'
   meeting_status: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
   notes: string
 }
@@ -65,7 +65,7 @@ const form = ref<CreateSessionForm>({
   starts_at: '',
   ends_at: '',
   room_name: '',
-  meeting_provider: 'JITSI',
+  meeting_provider: 'DAILY',
   meeting_status: 'SCHEDULED',
   notes: '',
 })
@@ -76,7 +76,7 @@ const resetForm = () => {
     starts_at: '',
     ends_at: '',
     room_name: '',
-    meeting_provider: 'JITSI',
+    meeting_provider: 'DAILY',
     meeting_status: 'SCHEDULED',
     notes: '',
   }
@@ -215,12 +215,12 @@ const openSession = async (id: number) => {
           />
         </div>
 
-        <div class="form-group">
-          <label>Meeting Provider</label>
-          <select v-model="form.meeting_provider">
-            <option value="JITSI">JITSI</option>
-          </select>
-        </div>
+      <div class="form-group">
+        <label>Meeting Provider</label>
+        <select v-model="form.meeting_provider">
+          <option value="DAILY">DAILY</option>
+        </select>
+      </div>
 
         <div class="form-group">
           <label>Meeting Status</label>

@@ -31,7 +31,7 @@
       "enum": [
         "MANUAL",
         "AUTO",
-        "JITSI_EVENT"
+        "PROVIDER_EVENT"
       ]
     },
     "class_session": {

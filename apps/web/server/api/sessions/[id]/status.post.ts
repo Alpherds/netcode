@@ -16,6 +16,13 @@ type SessionRecord = {
   meeting_provider?: string
   meeting_status?: SessionStatus
   notes?: string
+  classroom?: {
+    id?: number
+    title?: string
+    code?: string
+    term?: string
+    [key: string]: unknown
+  } | null
   [key: string]: unknown
 }
 
@@ -64,7 +71,7 @@ export default defineEventHandler(async (event): Promise<SessionRecord> => {
   }
 
   const existing = await $fetch<StrapiCollectionResponse<SessionRecord>>(
-    `${config.public.strapiUrl}/api/class-sessions?filters[id][$eq]=${id}&populate=*`,
+    `${config.public.strapiUrl}/api/class-sessions?filters[id][$eq]=${id}&populate=classroom`,
     {
       headers: {
         Authorization: `Bearer ${jwt}`,
@@ -81,7 +88,7 @@ export default defineEventHandler(async (event): Promise<SessionRecord> => {
     })
   }
 
-  const updated = await $fetch<StrapiSingleResponse<SessionRecord>>(
+  await $fetch<StrapiSingleResponse<SessionRecord>>(
     `${config.public.strapiUrl}/api/class-sessions/${session.documentId}`,
     {
       method: 'PUT',
@@ -96,5 +103,23 @@ export default defineEventHandler(async (event): Promise<SessionRecord> => {
     }
   )
 
-  return updated.data
+  const refreshed = await $fetch<StrapiCollectionResponse<SessionRecord>>(
+    `${config.public.strapiUrl}/api/class-sessions?filters[id][$eq]=${id}&populate=classroom`,
+    {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+      },
+    }
+  )
+
+  const updatedSession = refreshed.data?.[0]
+
+  if (!updatedSession) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Updated session not found',
+    })
+  }
+
+  return updatedSession
 })

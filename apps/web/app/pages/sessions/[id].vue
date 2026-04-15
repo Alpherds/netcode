@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch, useRoute } from '#imports'
-import { useAuth } from '~/composables/useAuth'
-import JitsiMeetingEmbed from '~/components/JitsiMeetingEmbed.vue'
+import DailyMeetingEmbed from '~/components/DailyMeetingEmbed.vue'
 
 definePageMeta({
   middleware: 'auth',
@@ -30,9 +29,16 @@ type SessionItem = {
   classroom?: ClassroomRef | null
 }
 
+type DailyJoinInfo = {
+  roomUrl: string
+  roomName: string
+  token: string
+  displayName: string
+  isOwner: boolean
+}
+
 const route = useRoute()
 const sessionId = route.params.id as string
-const { user } = useAuth()
 
 const {
   data: session,
@@ -42,8 +48,11 @@ const {
 } = await useFetch<SessionItem>(`/api/sessions/${sessionId}`)
 
 const isUpdatingStatus = ref(false)
+const isPreparingMeeting = ref(false)
 const statusMessage = ref('')
 const statusError = ref('')
+const showMeeting = ref(false)
+const joinInfo = ref<DailyJoinInfo | null>(null)
 
 const refreshSession = async () => {
   await refresh()
@@ -55,13 +64,12 @@ const classroomLabel = computed(() => {
   return [c.title, c.code, c.term].filter(Boolean).join(' · ')
 })
 
-const canStart = computed(() => {
-  return session.value?.meeting_status === 'SCHEDULED'
-})
-
-const canEnd = computed(() => {
-  return session.value?.meeting_status === 'LIVE'
-})
+const canStart = computed(() => session.value?.meeting_status === 'SCHEDULED')
+const canEnd = computed(() => session.value?.meeting_status === 'LIVE')
+const isLive = computed(() => session.value?.meeting_status === 'LIVE')
+const isScheduled = computed(() => session.value?.meeting_status === 'SCHEDULED')
+const isEnded = computed(() => session.value?.meeting_status === 'ENDED')
+const isCancelled = computed(() => session.value?.meeting_status === 'CANCELLED')
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '—'
@@ -92,7 +100,15 @@ const updateStatus = async (nextStatus: SessionStatus, silent = false) => {
       },
     })
 
-    session.value = updated
+    session.value = {
+      ...updated,
+      classroom: updated.classroom ?? session.value?.classroom ?? null,
+    }
+
+    if (nextStatus !== 'LIVE') {
+      showMeeting.value = false
+      joinInfo.value = null
+    }
 
     if (!silent) {
       statusMessage.value = `Session marked as ${nextStatus}.`
@@ -113,6 +129,25 @@ const startSession = async () => {
 
 const endSession = async () => {
   await updateStatus('ENDED')
+}
+
+const enterMeeting = async () => {
+  statusMessage.value = ''
+  statusError.value = ''
+  isPreparingMeeting.value = true
+
+  try {
+    const payload = await $fetch<DailyJoinInfo>(`/api/sessions/${sessionId}/daily-join`)
+    joinInfo.value = payload
+    showMeeting.value = true
+  } catch (error: any) {
+    statusError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to prepare Daily room.'
+  } finally {
+    isPreparingMeeting.value = false
+  }
 }
 
 const onMeetingJoined = async () => {
@@ -213,12 +248,51 @@ const onMeetingJoined = async () => {
           </span>
         </div>
 
-        <ClientOnly>
-          <JitsiMeetingEmbed
-            v-if="session?.room_name"
-            :room-name="session.room_name"
-            :display-name="user?.username"
-            :email="user?.email"
+        <div v-if="isScheduled" class="meeting-state-card">
+          <h3>Session has not started yet</h3>
+          <p>
+            The instructor needs to start the session before participants can
+            enter the meeting room.
+          </p>
+        </div>
+
+        <div v-else-if="isCancelled" class="meeting-state-card danger">
+          <h3>Session was cancelled</h3>
+          <p>
+            This meeting room is unavailable because the session was cancelled.
+          </p>
+        </div>
+
+        <div v-else-if="isEnded" class="meeting-state-card neutral">
+          <h3>Session has ended</h3>
+          <p>
+            The live meeting is closed. You can still review the session details
+            above.
+          </p>
+        </div>
+
+        <div v-else-if="isLive && !showMeeting" class="meeting-entry-card">
+          <div>
+            <h3>Meeting is live</h3>
+            <p>
+              You can enter the meeting room when ready.
+            </p>
+          </div>
+
+          <button
+            class="btn btn-primary"
+            :disabled="isPreparingMeeting"
+            @click="enterMeeting"
+          >
+            {{ isPreparingMeeting ? 'Preparing room...' : 'Enter Meeting' }}
+          </button>
+        </div>
+
+        <ClientOnly v-else-if="isLive && showMeeting">
+          <DailyMeetingEmbed
+            v-if="joinInfo"
+            :room-url="joinInfo.roomUrl"
+            :token="joinInfo.token"
             @joined="onMeetingJoined"
             @closed="goBack"
           />
@@ -354,7 +428,13 @@ const onMeetingJoined = async () => {
 
 .meeting-panel {
   margin-top: 12px;
-  padding: 22px;
+  padding: 18px;
+}
+
+.meeting-panel :deep(iframe) {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .panel-header {
@@ -382,6 +462,43 @@ const onMeetingJoined = async () => {
   white-space: nowrap;
 }
 
+.meeting-state-card,
+.meeting-entry-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.meeting-state-card h3,
+.meeting-entry-card h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.meeting-state-card p,
+.meeting-entry-card p {
+  margin: 0;
+  color: #6b7280;
+}
+
+.meeting-entry-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.meeting-state-card.danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.meeting-state-card.neutral {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+}
+
 .error {
   color: #b91c1c;
   border-color: #fecaca;
@@ -401,9 +518,14 @@ const onMeetingJoined = async () => {
     grid-template-columns: 1fr;
   }
 
-  .panel-header {
+  .panel-header,
+  .meeting-entry-card {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .meeting-panel {
+    padding: 14px;
   }
 }
 </style>

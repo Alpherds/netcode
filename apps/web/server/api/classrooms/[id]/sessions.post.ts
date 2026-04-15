@@ -5,7 +5,7 @@ type CreateSessionBody = {
   starts_at: string
   ends_at: string
   room_name?: string
-  meeting_provider?: 'JITSI'
+  meeting_provider?: 'DAILY'
   meeting_status?: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
   notes?: string
 }
@@ -98,7 +98,7 @@ export default defineEventHandler(async (event): Promise<CreatedSession> => {
             starts_at: startsAtIso,
             ends_at: endsAtIso,
             room_name: body.room_name?.trim() || `class-${classroomId}-room`,
-            meeting_provider: body.meeting_provider || 'JITSI',
+            meeting_provider: body.meeting_provider || 'DAILY',
             meeting_status: body.meeting_status || 'SCHEDULED',
             notes: body.notes?.trim() || '',
             classroom: Number(classroomId),

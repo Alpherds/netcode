@@ -460,7 +460,7 @@ export interface ApiAttendanceAttendance extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     publishedAt: Schema.Attribute.DateTime;
-    source: Schema.Attribute.Enumeration<['MANUAL', 'AUTO', 'JITSI_EVENT']>;
+    source: Schema.Attribute.Enumeration<['MANUAL', 'AUTO', 'PROVIDER_EVENT']>;
     student: Schema.Attribute.Relation<'manyToOne', 'api::profile.profile'>;
     updatedAt: Schema.Attribute.DateTime;
     updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
@@ -494,7 +494,7 @@ export interface ApiClassSessionClassSession
       'api::class-session.class-session'
     > &
       Schema.Attribute.Private;
-    meeting_provider: Schema.Attribute.Enumeration<['JITSI']>;
+    meeting_provider: Schema.Attribute.Enumeration<['DAILY']>;
     meeting_status: Schema.Attribute.Enumeration<
       ['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED']
     >;
