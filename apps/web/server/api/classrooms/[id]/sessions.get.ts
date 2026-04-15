@@ -2,6 +2,7 @@ import { createError, getCookie, getRouterParam } from 'h3'
 
 type SessionRecord = {
   id: number
+    documentId?: string
   title?: string
   starts_at?: string
   ends_at?: string

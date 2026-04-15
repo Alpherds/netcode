@@ -10,12 +10,9 @@ type CreateSessionBody = {
   notes?: string
 }
 
-type StrapiCreateResponse<T> = {
-  data: T
-}
-
 type CreatedSession = {
   id: number
+  documentId?: string
   title?: string
   starts_at?: string
   ends_at?: string
@@ -24,6 +21,10 @@ type CreatedSession = {
   meeting_status?: string
   notes?: string
   [key: string]: unknown
+}
+
+type StrapiSingleResponse<T> = {
+  data: T
 }
 
 const toIso = (value: string) => {
@@ -84,7 +85,7 @@ export default defineEventHandler(async (event): Promise<CreatedSession> => {
   }
 
   try {
-    const response = await $fetch<StrapiCreateResponse<CreatedSession>>(
+    const response = await $fetch<StrapiSingleResponse<CreatedSession>>(
       `${config.public.strapiUrl}/api/class-sessions`,
       {
         method: 'POST',

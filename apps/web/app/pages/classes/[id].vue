@@ -111,8 +111,8 @@ const submitSession = async () => {
 
   try {
     await $fetch(`/api/classrooms/${classroomId}/sessions`, {
-    method: 'POST' as 'POST',
-    body: form.value,
+      method: 'POST' as const,
+      body: form.value,
     })
 
     formSuccess.value = 'Session created successfully.'
@@ -156,6 +156,10 @@ const badgeClass = (status?: string | null) => {
       return 'badge'
   }
 }
+
+const openSession = async (id: number) => {
+  await navigateTo(`/sessions/${id}`)
+}
 </script>
 
 <template>
@@ -185,7 +189,11 @@ const badgeClass = (status?: string | null) => {
       <div class="form-grid">
         <div class="form-group full">
           <label>Session Title</label>
-          <input v-model="form.title" type="text" placeholder="Enter session title" />
+          <input
+            v-model="form.title"
+            type="text"
+            placeholder="Enter session title"
+          />
         </div>
 
         <div class="form-group">
@@ -200,7 +208,11 @@ const badgeClass = (status?: string | null) => {
 
         <div class="form-group">
           <label>Room Name</label>
-          <input v-model="form.room_name" type="text" placeholder="Optional room name" />
+          <input
+            v-model="form.room_name"
+            type="text"
+            placeholder="Optional room name"
+          />
         </div>
 
         <div class="form-group">
@@ -248,8 +260,14 @@ const badgeClass = (status?: string | null) => {
       </div>
     </section>
 
-    <section v-if="classroomPending" class="panel">Loading classroom...</section>
-    <section v-else-if="classroomError" class="panel error">Failed to load classroom.</section>
+    <section v-if="classroomPending" class="panel">
+      Loading classroom...
+    </section>
+
+    <section v-else-if="classroomError" class="panel error">
+      Failed to load classroom.
+    </section>
+
     <section v-else class="panel">
       <div class="class-header">
         <div>
@@ -266,9 +284,17 @@ const badgeClass = (status?: string | null) => {
         <span class="count">{{ safeSessions.length }}</span>
       </div>
 
-      <div v-if="sessionsPending" class="empty-state">Loading sessions...</div>
-      <div v-else-if="sessionsError" class="empty-state error">Failed to load sessions.</div>
-      <div v-else-if="safeSessions.length === 0" class="empty-state">No sessions yet.</div>
+      <div v-if="sessionsPending" class="empty-state">
+        Loading sessions...
+      </div>
+
+      <div v-else-if="sessionsError" class="empty-state error">
+        Failed to load sessions.
+      </div>
+
+      <div v-else-if="safeSessions.length === 0" class="empty-state">
+        No sessions yet.
+      </div>
 
       <div v-else class="session-list">
         <article
@@ -294,6 +320,12 @@ const badgeClass = (status?: string | null) => {
           </div>
 
           <p class="notes">{{ session.notes || 'No notes provided.' }}</p>
+
+          <div class="session-actions">
+            <button class="btn btn-primary" @click="openSession(session.id)">
+              Open Session
+            </button>
+          </div>
         </article>
       </div>
     </section>
@@ -545,6 +577,12 @@ const badgeClass = (status?: string | null) => {
 .notes {
   margin: 0;
   color: #374151;
+}
+
+.session-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .empty-state {
