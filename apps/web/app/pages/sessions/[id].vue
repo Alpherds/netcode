@@ -339,17 +339,9 @@ const onMeetingJoined = async () => {
 
 const onMeetingClosed = async () => {
   await markLeaveAttendance()
-  showMeeting.value = false
-  joinInfo.value = null
+  await goBack()
 }
 
-// const startAutoRefresh = () => {
-//   if (autoRefreshTimer) return
-
-//   autoRefreshTimer = setInterval(async () => {
-//     await refreshAttendance()
-//   }, 10000)
-// }
 
 let isPollingAttendance = false
 
