@@ -1,6 +1,24 @@
 import { createError, getCookie } from 'h3'
 
-export default defineEventHandler(async (event) => {
+type SessionUser = {
+  id: number
+  username: string
+  email: string
+}
+
+type ProfileRecord = {
+  id: number
+  display_name?: string
+  role_label?: string
+  auth_user_id?: number
+  [key: string]: unknown
+}
+
+type StrapiCollectionResponse<T> = {
+  data: T[]
+}
+
+export default defineEventHandler(async (event): Promise<ProfileRecord | null> => {
   const config = useRuntimeConfig(event)
   const jwt = getCookie(event, 'netcode_jwt')
   const rawUser = getCookie(event, 'netcode_user')
@@ -12,9 +30,9 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const user = JSON.parse(decodeURIComponent(rawUser))
+  const user = JSON.parse(decodeURIComponent(rawUser)) as SessionUser
 
-  const response = await $fetch<any>(
+  const response = await $fetch<StrapiCollectionResponse<ProfileRecord>>(
     `${config.public.strapiUrl}/api/profiles?filters[auth_user_id][$eq]=${user.id}`,
     {
       headers: {
@@ -23,5 +41,5 @@ export default defineEventHandler(async (event) => {
     }
   )
 
-  return response?.data?.[0] ?? null
+  return response.data[0] ?? null
 })

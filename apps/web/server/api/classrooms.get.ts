@@ -1,6 +1,19 @@
 import { createError, getCookie } from 'h3'
 
-export default defineEventHandler(async (event) => {
+type ClassroomRecord = {
+  id: number
+  title?: string
+  code?: string
+  term?: string
+  class_status?: string
+  [key: string]: unknown
+}
+
+type StrapiCollectionResponse<T> = {
+  data: T[]
+}
+
+export default defineEventHandler(async (event): Promise<ClassroomRecord[]> => {
   const config = useRuntimeConfig(event)
   const jwt = getCookie(event, 'netcode_jwt')
 
@@ -11,7 +24,7 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const response = await $fetch<any>(
+  const response = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
     `${config.public.strapiUrl}/api/classrooms?populate=*`,
     {
       headers: {
@@ -20,5 +33,5 @@ export default defineEventHandler(async (event) => {
     }
   )
 
-  return response?.data ?? []
+  return response.data ?? []
 })

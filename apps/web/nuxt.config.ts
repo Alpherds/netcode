@@ -1,7 +1,8 @@
 export default defineNuxtConfig({
+  compatibilityDate: '2026-04-15',
   runtimeConfig: {
     public: {
-      strapiUrl: process.env.NUXT_PUBLIC_STRAPI_URL || 'http://localhost:1337',
+      strapiUrl: '',
     },
   },
 })

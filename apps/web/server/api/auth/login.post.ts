@@ -37,7 +37,7 @@ export default defineEventHandler(async (event) => {
     setCookie(event, 'netcode_jwt', response.jwt, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
+      secure: false,
       path: '/',
     })
 
@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
       {
         httpOnly: false,
         sameSite: 'lax',
-        secure: process.env.NODE_ENV === 'production',
+        secure: false,
         path: '/',
       }
     )

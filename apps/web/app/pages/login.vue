@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { navigateTo } from '#imports'
+import { useAuth } from '~/composables/useAuth'
+
 const identifier = ref('')
 const password = ref('')
 const errorMessage = ref('')

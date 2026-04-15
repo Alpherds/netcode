@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { definePageMeta, navigateTo, useFetch } from '#imports'
+import { useAuth } from '~/composables/useAuth'
+
 definePageMeta({
   middleware: 'auth',
 })
