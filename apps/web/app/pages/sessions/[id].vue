@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { definePageMeta, navigateTo, useFetch, useRoute } from '#imports'
 import DailyMeetingEmbed from '~/components/DailyMeetingEmbed.vue'
 
@@ -29,12 +29,40 @@ type SessionItem = {
   classroom?: ClassroomRef | null
 }
 
+type ProfileItem = {
+  id: number
+  display_name?: string | null
+  role_label?: string | null
+}
+
 type DailyJoinInfo = {
   roomUrl: string
   roomName: string
   token: string
   displayName: string
   isOwner: boolean
+}
+
+type AttendanceStudent = {
+  id?: number
+  display_name?: string | null
+  student_no?: string | null
+  auth_user_id?: number
+}
+
+type AttendanceItem = {
+  id: number
+  documentId?: string
+  join_time?: string | null
+  leave_time?: string | null
+  attendance_status?: string | null
+  source?: string | null
+  student?: AttendanceStudent | null
+}
+
+type AttendanceMutationResult = {
+  tracked: boolean
+  reason?: string
 }
 
 const route = useRoute()
@@ -47,6 +75,8 @@ const {
   refresh,
 } = await useFetch<SessionItem>(`/api/sessions/${sessionId}`)
 
+const { data: profile } = await useFetch<ProfileItem>('/api/profile')
+
 const isUpdatingStatus = ref(false)
 const isPreparingMeeting = ref(false)
 const statusMessage = ref('')
@@ -54,8 +84,46 @@ const statusError = ref('')
 const showMeeting = ref(false)
 const joinInfo = ref<DailyJoinInfo | null>(null)
 
+const attendance = ref<AttendanceItem[]>([])
+const attendanceLoading = ref(false)
+const attendanceError = ref('')
+
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+
+const roleLabel = computed(() =>
+  String(profile.value?.role_label || '').toUpperCase()
+)
+
+const isInstructor = computed(
+  () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
+)
+
+const isStudent = computed(() => roleLabel.value === 'STUDENT')
+
 const refreshSession = async () => {
   await refresh()
+}
+
+const refreshAttendance = async () => {
+  attendanceLoading.value = true
+  attendanceError.value = ''
+
+  try {
+    attendance.value = await $fetch<AttendanceItem[]>(
+      `/api/sessions/${sessionId}/attendance`
+    )
+  } catch (error: any) {
+    attendanceError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to load attendance.'
+  } finally {
+    attendanceLoading.value = false
+  }
+}
+
+if (!error.value) {
+  await refreshAttendance()
 }
 
 const classroomLabel = computed(() => {
@@ -64,12 +132,85 @@ const classroomLabel = computed(() => {
   return [c.title, c.code, c.term].filter(Boolean).join(' · ')
 })
 
-const canStart = computed(() => session.value?.meeting_status === 'SCHEDULED')
-const canEnd = computed(() => session.value?.meeting_status === 'LIVE')
+const canStart = computed(
+  () => isInstructor.value && session.value?.meeting_status === 'SCHEDULED'
+)
+
+const canEnd = computed(
+  () => isInstructor.value && session.value?.meeting_status === 'LIVE'
+)
+
 const isLive = computed(() => session.value?.meeting_status === 'LIVE')
 const isScheduled = computed(() => session.value?.meeting_status === 'SCHEDULED')
 const isEnded = computed(() => session.value?.meeting_status === 'ENDED')
 const isCancelled = computed(() => session.value?.meeting_status === 'CANCELLED')
+
+const attendanceCount = computed(() => attendance.value.length)
+
+const presentCount = computed(
+  () =>
+    attendance.value.filter(
+      (item) => String(item.attendance_status || '').toUpperCase() === 'PRESENT'
+    ).length
+)
+
+const leftCount = computed(
+  () =>
+    attendance.value.filter(
+      (item) => String(item.attendance_status || '').toUpperCase() === 'LEFT'
+    ).length
+)
+
+const canEnterMeeting = computed(() => {
+  if (!isLive.value) return false
+  return isInstructor.value || isStudent.value
+})
+
+const accessTitle = computed(() => {
+  if (isScheduled.value) {
+    return isStudent.value
+      ? 'Wait for the instructor to start the session'
+      : 'Session has not started yet'
+  }
+
+  if (isEnded.value) {
+    return 'Session has ended'
+  }
+
+  if (isCancelled.value) {
+    return 'Session was cancelled'
+  }
+
+  if (isLive.value) {
+    return 'Meeting is live'
+  }
+
+  return 'Meeting unavailable'
+})
+
+const accessMessage = computed(() => {
+  if (isScheduled.value) {
+    return isStudent.value
+      ? 'Students can only enter after the instructor starts the session.'
+      : 'Start the session to allow students to enter the meeting room.'
+  }
+
+  if (isEnded.value) {
+    return isStudent.value
+      ? 'This session is already closed and can no longer be joined.'
+      : 'The live meeting is closed. You can still review the session details and attendance.'
+  }
+
+  if (isCancelled.value) {
+    return 'This meeting room is unavailable because the session was cancelled.'
+  }
+
+  if (isLive.value) {
+    return 'You can enter the meeting room when ready.'
+  }
+
+  return 'This meeting is unavailable right now.'
+})
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return '—'
@@ -113,6 +254,8 @@ const updateStatus = async (nextStatus: SessionStatus, silent = false) => {
     if (!silent) {
       statusMessage.value = `Session marked as ${nextStatus}.`
     }
+
+    await refreshAttendance()
   } catch (error: any) {
     statusError.value =
       error?.data?.message ||
@@ -150,11 +293,87 @@ const enterMeeting = async () => {
   }
 }
 
-const onMeetingJoined = async () => {
-  if (session.value?.meeting_status === 'SCHEDULED') {
-    await updateStatus('LIVE', true)
+const markJoinAttendance = async () => {
+  try {
+    const result = await $fetch<AttendanceMutationResult>(
+      `/api/sessions/${sessionId}/attendance`,
+      {
+        method: 'POST',
+      }
+    )
+
+    if (result.tracked) {
+      await refreshAttendance()
+    }
+  } catch (error: any) {
+    statusError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to log attendance.'
   }
 }
+
+const markLeaveAttendance = async () => {
+  try {
+    const result = await $fetch<AttendanceMutationResult>(
+      `/api/sessions/${sessionId}/attendance`,
+      {
+        method: 'PUT',
+      }
+    )
+
+    if (result.tracked) {
+      await refreshAttendance()
+    }
+  } catch (error: any) {
+    statusError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to update attendance.'
+  }
+}
+
+const onMeetingJoined = async () => {
+  await markJoinAttendance()
+}
+
+const onMeetingClosed = async () => {
+  await markLeaveAttendance()
+  showMeeting.value = false
+  joinInfo.value = null
+}
+
+const startAutoRefresh = () => {
+  if (autoRefreshTimer) return
+
+  autoRefreshTimer = setInterval(async () => {
+    await refreshSession()
+    await refreshAttendance()
+  }, 10000)
+}
+
+const stopAutoRefresh = () => {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
+watch(
+  () => session.value?.meeting_status,
+  (status) => {
+    if (status === 'LIVE') {
+      startAutoRefresh()
+    } else {
+      stopAutoRefresh()
+    }
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  stopAutoRefresh()
+})
 </script>
 
 <template>
@@ -248,38 +467,26 @@ const onMeetingJoined = async () => {
           </span>
         </div>
 
-        <div v-if="isScheduled" class="meeting-state-card">
-          <h3>Session has not started yet</h3>
-          <p>
-            The instructor needs to start the session before participants can
-            enter the meeting room.
-          </p>
-        </div>
-
-        <div v-else-if="isCancelled" class="meeting-state-card danger">
-          <h3>Session was cancelled</h3>
-          <p>
-            This meeting room is unavailable because the session was cancelled.
-          </p>
-        </div>
-
-        <div v-else-if="isEnded" class="meeting-state-card neutral">
-          <h3>Session has ended</h3>
-          <p>
-            The live meeting is closed. You can still review the session details
-            above.
-          </p>
+        <div
+          v-if="isScheduled || isCancelled || isEnded"
+          class="meeting-state-card"
+          :class="{
+            danger: isCancelled,
+            neutral: isEnded,
+          }"
+        >
+          <h3>{{ accessTitle }}</h3>
+          <p>{{ accessMessage }}</p>
         </div>
 
         <div v-else-if="isLive && !showMeeting" class="meeting-entry-card">
           <div>
-            <h3>Meeting is live</h3>
-            <p>
-              You can enter the meeting room when ready.
-            </p>
+            <h3>{{ accessTitle }}</h3>
+            <p>{{ accessMessage }}</p>
           </div>
 
           <button
+            v-if="canEnterMeeting"
             class="btn btn-primary"
             :disabled="isPreparingMeeting"
             @click="enterMeeting"
@@ -294,7 +501,7 @@ const onMeetingJoined = async () => {
             :room-url="joinInfo.roomUrl"
             :token="joinInfo.token"
             @joined="onMeetingJoined"
-            @closed="goBack"
+            @closed="onMeetingClosed"
           />
 
           <template #fallback>
@@ -304,6 +511,63 @@ const onMeetingJoined = async () => {
 
         <div v-if="!session?.room_name" class="panel error">
           This session has no room name yet.
+        </div>
+      </section>
+
+      <section class="panel attendance-panel">
+        <div class="panel-header attendance-header">
+          <div>
+            <h2>Attendance</h2>
+            <p class="attendance-subtitle">
+              Live attendance updates every 10 seconds while the session is active.
+            </p>
+          </div>
+
+          <div class="attendance-chips">
+            <span class="room-chip">Total {{ attendanceCount }}</span>
+            <span class="attendance-chip present-chip">Present {{ presentCount }}</span>
+            <span class="attendance-chip left-chip">Left {{ leftCount }}</span>
+          </div>
+        </div>
+
+        <div v-if="attendanceLoading" class="attendance-empty">
+          Loading attendance...
+        </div>
+
+        <div v-else-if="attendanceError" class="attendance-empty error-lite">
+          {{ attendanceError }}
+        </div>
+
+        <div v-else-if="!attendance.length" class="attendance-empty">
+          No attendance records yet.
+        </div>
+
+        <div v-else-if="isInstructor" class="attendance-list">
+          <div v-for="item in attendance" :key="item.id" class="attendance-row">
+            <div>
+              <strong>{{ item.student?.display_name || 'Unknown student' }}</strong>
+              <p>{{ item.student?.student_no || 'No student number' }}</p>
+            </div>
+
+            <div>
+              <span class="attendance-label">Joined</span>
+              <strong>{{ formatDateTime(item.join_time) }}</strong>
+            </div>
+
+            <div>
+              <span class="attendance-label">Left</span>
+              <strong>{{ formatDateTime(item.leave_time) }}</strong>
+            </div>
+
+            <div>
+              <span class="attendance-label">Status</span>
+              <strong>{{ item.attendance_status || '—' }}</strong>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="attendance-empty">
+          Attendance details are visible to the instructor.
         </div>
       </section>
     </template>
@@ -397,7 +661,8 @@ const onMeetingJoined = async () => {
   padding: 14px;
 }
 
-.summary-label {
+.summary-label,
+.attendance-label {
   display: block;
   margin-bottom: 8px;
   font-size: 12px;
@@ -499,6 +764,82 @@ const onMeetingJoined = async () => {
   background: #f9fafb;
 }
 
+.attendance-panel {
+  padding: 18px;
+}
+
+.attendance-header {
+  align-items: flex-start;
+}
+
+.attendance-subtitle {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.attendance-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.attendance-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.present-chip {
+  background: #ecfdf5;
+  color: #166534;
+}
+
+.left-chip {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.attendance-empty {
+  border: 1px dashed #d1d5db;
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  color: #6b7280;
+}
+
+.error-lite {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.attendance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.attendance-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 16px;
+  border: 1px solid #eef2f7;
+  background: #f9fbff;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.attendance-row p {
+  margin: 6px 0 0;
+  color: #6b7280;
+}
+
 .error {
   color: #b91c1c;
   border-color: #fecaca;
@@ -519,13 +860,19 @@ const onMeetingJoined = async () => {
   }
 
   .panel-header,
-  .meeting-entry-card {
+  .meeting-entry-card,
+  .attendance-header {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .meeting-panel {
+  .meeting-panel,
+  .attendance-panel {
     padding: 14px;
+  }
+
+  .attendance-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

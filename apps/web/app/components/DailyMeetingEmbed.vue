@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
+type DailyEventHandler = (...args: any[]) => void
+
 type DailyCallFrame = {
-  on: (event: string, handler: (...args: any[]) => void) => DailyCallFrame
-  join: (options: { url: string; token: string }) => Promise<void>
-  leave: () => Promise<void>
-  destroy: () => Promise<void>
+  on: (event: string, handler: DailyEventHandler) => DailyCallFrame
+  off?: (event: string, handler: DailyEventHandler) => DailyCallFrame
+  join: (options: { url: string; token: string }) => Promise<any>
+  leave?: () => Promise<any>
+  destroy: () => Promise<any>
+  isDestroyed?: () => boolean
 }
 
 const props = defineProps<{
@@ -23,7 +27,66 @@ const loading = ref(true)
 const errorMessage = ref('')
 
 let callFrame: DailyCallFrame | null = null
-let hasJoined = false
+let cleanupStarted = false
+let joinedOnce = false
+
+const handleJoined: DailyEventHandler = () => {
+  if (cleanupStarted) return
+  loading.value = false
+  joinedOnce = true
+  emit('joined')
+}
+
+const handleLeft: DailyEventHandler = () => {
+  if (cleanupStarted) return
+  emit('closed')
+}
+
+const handleError: DailyEventHandler = (event: any) => {
+  if (cleanupStarted) return
+
+  errorMessage.value =
+    event?.errorMsg ||
+    event?.errorMsg?.msg ||
+    event?.message ||
+    'Failed to join Daily room'
+
+  loading.value = false
+}
+
+const detachListeners = () => {
+  if (!callFrame?.off) return
+
+  try {
+    callFrame.off('joined-meeting', handleJoined)
+    callFrame.off('left-meeting', handleLeft)
+    callFrame.off('error', handleError)
+  } catch {
+    // ignore listener cleanup issues
+  }
+}
+
+const safeDestroy = async () => {
+  if (!callFrame || cleanupStarted) return
+
+  cleanupStarted = true
+  detachListeners()
+
+  try {
+    const alreadyDestroyed =
+      typeof callFrame.isDestroyed === 'function'
+        ? callFrame.isDestroyed()
+        : false
+
+    if (!alreadyDestroyed) {
+      await callFrame.destroy()
+    }
+  } catch {
+    // swallow destroy-time issues from provider internals
+  } finally {
+    callFrame = null
+  }
+}
 
 onMounted(async () => {
   try {
@@ -45,50 +108,29 @@ onMounted(async () => {
       showLeaveButton: true,
     }) as DailyCallFrame
 
-    callFrame
-      .on('joined-meeting', () => {
-        loading.value = false
-        hasJoined = true
-        emit('joined')
-      })
-      .on('left-meeting', () => {
-        emit('closed')
-      })
-      .on('error', (event: any) => {
-        errorMessage.value =
-          event?.errorMsg ||
-          event?.errorMsg?.msg ||
-          event?.message ||
-          'Failed to join Daily room'
-        loading.value = false
-      })
+    callFrame.on('joined-meeting', handleJoined)
+    callFrame.on('left-meeting', handleLeft)
+    callFrame.on('error', handleError)
 
     await callFrame.join({
       url: props.roomUrl,
       token: props.token,
     })
 
-    loading.value = false
+    if (!cleanupStarted) {
+      loading.value = false
+    }
   } catch (error: any) {
-    errorMessage.value =
-      error?.message || 'Failed to initialize Daily meeting'
-    loading.value = false
+    if (!cleanupStarted) {
+      errorMessage.value =
+        error?.message || 'Failed to initialize Daily meeting'
+      loading.value = false
+    }
   }
 })
 
 onBeforeUnmount(async () => {
-  try {
-    if (callFrame) {
-      if (hasJoined) {
-        await callFrame.leave()
-      }
-      await callFrame.destroy()
-    }
-  } catch {
-    // ignore cleanup errors
-  } finally {
-    callFrame = null
-  }
+  await safeDestroy()
 })
 </script>
 
