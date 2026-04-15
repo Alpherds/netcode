@@ -343,12 +343,29 @@ const onMeetingClosed = async () => {
   joinInfo.value = null
 }
 
+// const startAutoRefresh = () => {
+//   if (autoRefreshTimer) return
+
+//   autoRefreshTimer = setInterval(async () => {
+//     await refreshAttendance()
+//   }, 10000)
+// }
+
+let isPollingAttendance = false
+
 const startAutoRefresh = () => {
   if (autoRefreshTimer) return
 
   autoRefreshTimer = setInterval(async () => {
-    await refreshSession()
-    await refreshAttendance()
+    if (isPollingAttendance) return
+
+    isPollingAttendance = true
+
+    try {
+      await refreshAttendance()
+    } finally {
+      isPollingAttendance = false
+    }
   }, 10000)
 }
 
