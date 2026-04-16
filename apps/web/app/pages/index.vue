@@ -264,6 +264,10 @@ const handleLogout = async () => {
   }
 }
 
+const goToRj45Simulator = async () => {
+  await navigateTo('/simulators/rj45')
+}
+
 const startAutoRefresh = () => {
   if (refreshTimer) return
 
@@ -736,44 +740,54 @@ const classroomStatusLabel = (status?: string | null) => {
                       </div>
                     </div>
 
-                    <v-chip size="small" variant="outlined">UI Only</v-chip>
+                    <v-chip size="small" variant="outlined">Program</v-chip>
                   </div>
 
                   <div class="text-medium-emphasis mt-6">
-                    Interactive coding workspace for lab exercises,
-                    submissions, and feedback.
+                    Interactive coding workspace.
                   </div>
                 </v-card-text>
               </v-card>
 
-              <v-card
-                rounded="xl"
-                variant="tonal"
-                color="indigo-darken-1"
-                class="tool-card"
-              >
-                <v-card-text class="pa-5 d-flex flex-column justify-space-between h-100">
-                  <div class="d-flex align-start justify-space-between ga-3">
-                    <div class="d-flex ga-3">
-                      <v-avatar color="indigo-darken-1" size="48">
-                        <v-icon>mdi-monitor-dashboard</v-icon>
-                      </v-avatar>
+<v-card
+  rounded="xl"
+  variant="tonal"
+  color="indigo-darken-1"
+  class="tool-card"
+>
+  <v-card-text class="pa-5 d-flex flex-column justify-space-between h-100">
+    <div class="d-flex align-start justify-space-between ga-3">
+      <div class="d-flex ga-3">
+        <v-avatar color="indigo-darken-1" size="48">
+          <v-icon>mdi-ethernet</v-icon>
+        </v-avatar>
 
-                      <div>
-                        <div class="text-h6 font-weight-bold">Simulator</div>
-                        <div class="text-medium-emphasis">Coming soon</div>
-                      </div>
-                    </div>
+        <div>
+          <div class="text-h6 font-weight-bold">RJ45 Simulator</div>
+          <div class="text-medium-emphasis">Interactive guided demo</div>
+        </div>
+      </div>
 
-                    <v-chip size="small" variant="outlined">UI Only</v-chip>
-                  </div>
+      <v-chip size="small" variant="outlined">Available</v-chip>
+    </div>
 
-                  <div class="text-medium-emphasis mt-6">
-                    Virtual simulation area for guided activities and
-                    interactive demonstrations.
-                  </div>
-                </v-card-text>
-              </v-card>
+    <div class="text-medium-emphasis mt-6 mb-4">
+      Practice the RJ45 crimping flow with a guided animated demo:
+      strip jacket, organize T568B wires, trim, insert, and crimp.
+    </div>
+
+    <div class="d-flex">
+      <v-btn
+        color="primary"
+        rounded="pill"
+        prepend-icon="mdi-open-in-new"
+        @click="goToRj45Simulator"
+      >
+        Open Simulator
+      </v-btn>
+    </div>
+  </v-card-text>
+</v-card>
             </div>
           </v-card-text>
         </v-card>
