@@ -37,6 +37,8 @@ type ClassroomForm = {
   class_status: 'OPEN' | 'CLOSED' | 'ARCHIVED'
 }
 
+type ClassroomTab = 'ACTIVE' | 'ARCHIVED'
+
 const { user, logout } = useAuth()
 
 const {
@@ -55,6 +57,8 @@ const {
 
 const safeProfile = computed(() => profile.value ?? null)
 const safeClassrooms = computed(() => classrooms.value ?? [])
+
+const currentTab = ref<ClassroomTab>('ACTIVE')
 
 const displayName = computed(() => {
   if (safeProfile.value?.display_name) return safeProfile.value.display_name
@@ -76,12 +80,24 @@ const idLabel = computed(() => {
 })
 
 const activeClassesCount = computed(() =>
-  safeClassrooms.value.filter((c) => c.class_status === 'OPEN').length
+  safeClassrooms.value.filter((c) => String(c.class_status || '').toUpperCase() !== 'ARCHIVED').length
 )
 
 const archivedClassesCount = computed(() =>
-  safeClassrooms.value.filter((c) => c.class_status === 'ARCHIVED').length
+  safeClassrooms.value.filter((c) => String(c.class_status || '').toUpperCase() === 'ARCHIVED').length
 )
+
+const filteredClassrooms = computed(() => {
+  if (currentTab.value === 'ARCHIVED') {
+    return safeClassrooms.value.filter(
+      (c) => String(c.class_status || '').toUpperCase() === 'ARCHIVED'
+    )
+  }
+
+  return safeClassrooms.value.filter(
+    (c) => String(c.class_status || '').toUpperCase() !== 'ARCHIVED'
+  )
+})
 
 const showCreateClassroom = ref(false)
 const isCreatingClassroom = ref(false)
@@ -161,6 +177,7 @@ const submitCreateClassroom = async () => {
     await refreshClassrooms()
     resetClassroomForm()
     showCreateClassroom.value = false
+    currentTab.value = 'ACTIVE'
   } catch (error: any) {
     classroomFormError.value =
       error?.data?.message ||
@@ -191,6 +208,14 @@ const updateClassroomStatus = async (
 
     classroomStatusSuccess.value = `Classroom marked as ${nextStatus}.`
     await refreshClassrooms()
+
+    if (nextStatus === 'ARCHIVED') {
+      currentTab.value = 'ACTIVE'
+    }
+
+    if (nextStatus === 'OPEN') {
+      currentTab.value = 'ACTIVE'
+    }
   } catch (error: any) {
     classroomStatusError.value =
       error?.data?.message ||
@@ -265,12 +290,12 @@ const openClassroom = async (id: number) => {
       </article>
 
       <article class="stat-card">
-        <span class="stat-label">Open Classes</span>
+        <span class="stat-label">Visible Classrooms</span>
         <strong class="stat-value">{{ activeClassesCount }}</strong>
       </article>
 
       <article class="stat-card">
-        <span class="stat-label">Archived Classes</span>
+        <span class="stat-label">Archived Classrooms</span>
         <strong class="stat-value">{{ archivedClassesCount }}</strong>
       </article>
     </section>
@@ -341,7 +366,7 @@ const openClassroom = async (id: number) => {
           <h2>My Classrooms</h2>
 
           <div class="classes-header-actions">
-            <span class="panel-count">{{ safeClassrooms.length }}</span>
+            <span class="panel-count">{{ filteredClassrooms.length }}</span>
 
             <button
               v-if="canCreateClassroom"
@@ -351,6 +376,26 @@ const openClassroom = async (id: number) => {
               {{ showCreateClassroom ? 'Close Form' : 'Create Classroom' }}
             </button>
           </div>
+        </div>
+
+        <div class="tabs-row">
+          <button
+            class="tab-btn"
+            :class="{ active: currentTab === 'ACTIVE' }"
+            @click="currentTab = 'ACTIVE'"
+          >
+            Active Classrooms
+            <span class="tab-count">{{ activeClassesCount }}</span>
+          </button>
+
+          <button
+            class="tab-btn"
+            :class="{ active: currentTab === 'ARCHIVED' }"
+            @click="currentTab = 'ARCHIVED'"
+          >
+            Archived Classrooms
+            <span class="tab-count">{{ archivedClassesCount }}</span>
+          </button>
         </div>
 
         <section
@@ -449,13 +494,17 @@ const openClassroom = async (id: number) => {
           Failed to load classrooms.
         </div>
 
-        <div v-else-if="safeClassrooms.length === 0" class="empty-state">
-          No classrooms available yet.
+        <div v-else-if="filteredClassrooms.length === 0" class="empty-state">
+          {{
+            currentTab === 'ARCHIVED'
+              ? 'No archived classrooms yet.'
+              : 'No classrooms available yet.'
+          }}
         </div>
 
         <div v-else class="classroom-grid">
           <article
-            v-for="classroom in safeClassrooms"
+            v-for="classroom in filteredClassrooms"
             :key="classroom.id"
             class="classroom-card clickable"
             @click="openClassroom(classroom.id)"
@@ -701,6 +750,43 @@ const openClassroom = async (id: number) => {
   background: #eef2ff;
   color: #4338ca;
   font-weight: 700;
+}
+
+.tabs-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.tab-btn {
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.tab-btn.active {
+  background: #111827;
+  color: #ffffff;
+  border-color: #111827;
+}
+
+.tab-count {
+  display: inline-flex;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .create-classroom-box {

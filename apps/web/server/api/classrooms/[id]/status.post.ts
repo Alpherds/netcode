@@ -1,6 +1,7 @@
 import { createError, getCookie, getRouterParam, readBody } from 'h3'
 
 type ClassroomStatus = 'OPEN' | 'CLOSED' | 'ARCHIVED'
+type SessionStatus = 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
 
 type StatusBody = {
   class_status?: ClassroomStatus
@@ -38,6 +39,14 @@ type ClassroomRecord = {
   term?: string | null
   class_status?: ClassroomStatus | null
   instructor?: ProfileRecord | null
+  [key: string]: unknown
+}
+
+type SessionRecord = {
+  id: number
+  documentId?: string
+  title?: string | null
+  meeting_status?: SessionStatus | null
   [key: string]: unknown
 }
 
@@ -128,6 +137,25 @@ export default defineEventHandler(async (event): Promise<ClassroomRecord> => {
           ? 'You do not own this classroom'
           : 'Classroom not found',
     })
+  }
+
+  if (nextStatus === 'ARCHIVED') {
+    const sessionsResponse = await $fetch<StrapiCollectionResponse<SessionRecord>>(
+      `${strapiUrl}/api/class-sessions?filters[classroom][id][$eq]=${classroomId}&sort[0]=starts_at:asc`,
+      { headers }
+    )
+
+    const hasActiveSessions = (sessionsResponse.data || []).some((session) => {
+      const status = String(session.meeting_status || '').toUpperCase()
+      return status === 'SCHEDULED' || status === 'LIVE'
+    })
+
+    if (hasActiveSessions) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'You cannot archive a classroom with active sessions',
+      })
+    }
   }
 
   await $fetch<StrapiSingleResponse<ClassroomRecord>>(
