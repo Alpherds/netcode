@@ -5,16 +5,17 @@ export default defineNuxtConfig({
 
   css: ['@mdi/font/css/materialdesignicons.css'],
 
-  runtimeConfig: {
-    DAILY_API_KEY: process.env.NUXT_DAILY_API_KEY || process.env.DAILY_API_KEY || '',
-    DAILY_ROOM_PREFIX:
-      process.env.NUXT_DAILY_ROOM_PREFIX ||
-      process.env.DAILY_ROOM_PREFIX ||
-      'netcode-session-',
-    public: {
-      strapiUrl: process.env.NUXT_PUBLIC_STRAPI_URL || '',
-    },
+runtimeConfig: {
+  STRAPI_API_TOKEN: process.env.STRAPI_API_TOKEN || '',
+  DAILY_API_KEY: process.env.NUXT_DAILY_API_KEY || process.env.DAILY_API_KEY || '',
+  DAILY_ROOM_PREFIX:
+    process.env.NUXT_DAILY_ROOM_PREFIX ||
+    process.env.DAILY_ROOM_PREFIX ||
+    'netcode-session-',
+  public: {
+    strapiUrl: process.env.NUXT_PUBLIC_STRAPI_URL || '',
   },
+},
 
   vuetify: {
     moduleOptions: {},

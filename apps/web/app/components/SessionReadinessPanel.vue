@@ -46,14 +46,28 @@ const formatDateTime = (value?: string | null) => {
   return new Date(value).toLocaleString()
 }
 
-const badgeClass = (state: string) => {
+const studentInitial = (name?: string | null) =>
+  String(name || 'S').trim().charAt(0).toUpperCase()
+
+const studentMeta = (student: ReadinessStudent) => {
+  return [
+    student.student_no || 'No student number',
+    student.program || '',
+    student.year_level || '',
+    student.section || '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+const readinessColor = (state: string) => {
   switch (state) {
     case 'JOINED':
-      return 'badge joined'
+      return 'success'
     case 'LEFT':
-      return 'badge left'
+      return 'warning'
     default:
-      return 'badge waiting'
+      return 'info'
   }
 }
 
@@ -94,6 +108,7 @@ const startPolling = () => {
   if (timer) return
 
   timer = setInterval(async () => {
+    if (document.hidden) return
     await refreshReadiness()
   }, 10000)
 }
@@ -127,239 +142,189 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panel">
-    <div class="panel-header">
-      <div>
-        <h2>Participant Readiness</h2>
-        <p class="panel-subtitle">
-          Track who is enrolled, who has joined, and who is still waiting.
-        </p>
+  <v-card rounded="xl" elevation="3" class="readiness-shell mb-6">
+    <v-card-text class="pa-5">
+      <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4">
+        <div>
+          <div class="text-h5 font-weight-bold">Participant Readiness</div>
+          <div class="text-body-2 text-medium-emphasis">
+            Track who is enrolled, who has joined, and who is still waiting.
+          </div>
+        </div>
+
+        <v-btn
+          color="primary"
+          variant="tonal"
+          rounded="pill"
+          prepend-icon="mdi-refresh"
+          :loading="loading"
+          @click="loadReadiness"
+        >
+          Refresh
+        </v-btn>
       </div>
 
-      <button class="btn" @click="loadReadiness">Refresh</button>
-    </div>
+      <div v-if="readiness" class="d-flex flex-wrap ga-3 mb-4">
+        <v-sheet rounded="xl" color="primary" variant="tonal" class="stat-box pa-4">
+          <div class="text-overline">Total</div>
+          <div class="text-h6 font-weight-bold">{{ readiness.totalEnrolled }}</div>
+        </v-sheet>
 
-    <div class="chips" v-if="readiness">
-      <span class="chip total">Total {{ readiness.totalEnrolled }}</span>
-      <span class="chip joined">Joined {{ readiness.joinedCount }}</span>
-      <span class="chip waiting">Waiting {{ readiness.waitingCount }}</span>
-      <span class="chip left">Left {{ readiness.leftCount }}</span>
-    </div>
+        <v-sheet rounded="xl" color="success" variant="tonal" class="stat-box pa-4">
+          <div class="text-overline">Joined</div>
+          <div class="text-h6 font-weight-bold">{{ readiness.joinedCount }}</div>
+        </v-sheet>
 
-    <div v-if="loading" class="empty-state">
-      Loading participant readiness...
-    </div>
+        <v-sheet rounded="xl" color="info" variant="tonal" class="stat-box pa-4">
+          <div class="text-overline">Waiting</div>
+          <div class="text-h6 font-weight-bold">{{ readiness.waitingCount }}</div>
+        </v-sheet>
 
-    <div v-else-if="errorMessage" class="empty-state error">
-      {{ errorMessage }}
-    </div>
+        <v-sheet rounded="xl" color="warning" variant="tonal" class="stat-box pa-4">
+          <div class="text-overline">Left</div>
+          <div class="text-h6 font-weight-bold">{{ readiness.leftCount }}</div>
+        </v-sheet>
+      </div>
 
-    <div v-else-if="!rows.length" class="empty-state">
-      No enrolled students found for this classroom.
-    </div>
+      <div v-if="loading" class="empty-wrap">
+        <v-progress-circular indeterminate color="primary" />
+        <div class="mt-3 text-medium-emphasis">Loading participant readiness...</div>
+      </div>
 
-    <div v-else class="readiness-list">
-      <article
-        v-for="row in rows"
-        :key="row.student.id"
-        class="readiness-card"
+      <v-alert
+        v-else-if="errorMessage"
+        type="error"
+        variant="tonal"
       >
-        <div>
-          <strong>{{ row.student.display_name || 'Unnamed student' }}</strong>
-          <p>
-            {{ row.student.student_no || 'No student number' }}
-            <span v-if="row.student.program"> · {{ row.student.program }}</span>
-            <span v-if="row.student.year_level"> · {{ row.student.year_level }}</span>
-            <span v-if="row.student.section"> · {{ row.student.section }}</span>
-          </p>
-        </div>
+        {{ errorMessage }}
+      </v-alert>
 
-        <div class="meta">
-          <div>
-            <span class="meta-label">Joined</span>
-            <strong>{{ formatDateTime(row.join_time) }}</strong>
-          </div>
+      <v-alert
+        v-else-if="!rows.length"
+        type="info"
+        variant="tonal"
+      >
+        No enrolled students found for this classroom.
+      </v-alert>
 
-          <div>
-            <span class="meta-label">Left</span>
-            <strong>{{ formatDateTime(row.leave_time) }}</strong>
-          </div>
+      <v-row v-else dense>
+        <v-col
+          v-for="row in rows"
+          :key="row.student.id"
+          cols="12"
+        >
+          <v-card rounded="xl" elevation="1" class="readiness-card">
+            <v-card-text class="pa-4">
+              <div class="d-flex flex-column flex-lg-row justify-space-between align-start ga-4">
+                <div class="d-flex align-center ga-3 min-w-0 readiness-student">
+                  <v-avatar color="primary" variant="tonal" size="48">
+                    {{ studentInitial(row.student.display_name) }}
+                  </v-avatar>
 
-          <div>
-            <span class="meta-label">State</span>
-            <span :class="badgeClass(row.readiness_state)">
-              {{ row.readiness_state }}
-            </span>
-          </div>
-        </div>
-      </article>
-    </div>
-  </section>
+                  <div class="min-w-0">
+                    <div class="text-subtitle-1 font-weight-bold text-truncate">
+                      {{ row.student.display_name || 'Unnamed student' }}
+                    </div>
+                    <div class="text-body-2 text-medium-emphasis">
+                      {{ studentMeta(row.student) }}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="readiness-meta-grid">
+                  <v-sheet rounded="lg" color="surface-variant" class="pa-3 meta-box">
+                    <div class="text-caption text-medium-emphasis mb-2">Joined</div>
+                    <div class="font-weight-medium">
+                      {{ formatDateTime(row.join_time) }}
+                    </div>
+                  </v-sheet>
+
+                  <v-sheet rounded="lg" color="surface-variant" class="pa-3 meta-box">
+                    <div class="text-caption text-medium-emphasis mb-2">Left</div>
+                    <div class="font-weight-medium">
+                      {{ formatDateTime(row.leave_time) }}
+                    </div>
+                  </v-sheet>
+
+                  <div class="d-flex flex-column ga-2 justify-center">
+                    <div class="text-caption text-medium-emphasis">State</div>
+                    <div class="d-flex flex-wrap ga-2">
+                      <v-chip
+                        :color="readinessColor(row.readiness_state)"
+                        variant="tonal"
+                        rounded="pill"
+                      >
+                        {{ row.readiness_state }}
+                      </v-chip>
+
+                      <v-chip
+                        v-if="row.attendance_status"
+                        color="primary"
+                        variant="outlined"
+                        rounded="pill"
+                      >
+                        {{ row.attendance_status }}
+                      </v-chip>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-col>
+      </v-row>
+    </v-card-text>
+  </v-card>
 </template>
 
 <style scoped>
-.panel {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 20px;
-  padding: 22px;
-  margin-bottom: 20px;
-}
-
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 18px;
-}
-
-.panel-header h2 {
-  margin: 0;
-}
-
-.panel-subtitle {
-  margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.chips {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.total {
-  background: #eef2ff;
-  color: #4338ca;
-}
-
-.joined {
-  background: #ecfdf5;
-  color: #166534;
-}
-
-.waiting {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
-.left {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.readiness-list {
-  display: grid;
-  gap: 12px;
+.readiness-shell {
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .readiness-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 16px;
-  background: #fcfdff;
-  display: grid;
-  grid-template-columns: 2fr 3fr;
-  gap: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
 }
 
-.readiness-card p {
-  margin: 6px 0 0;
-  color: #6b7280;
+.stat-box {
+  min-width: 130px;
 }
 
-.meta {
+.empty-wrap {
+  padding: 28px;
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 20px;
+  text-align: center;
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.min-w-0 {
+  min-width: 0;
+}
+
+.readiness-meta-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+  width: 100%;
+  max-width: 720px;
 }
 
-.meta-label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: #6b7280;
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+.meta-box {
+  min-height: 84px;
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.badge.joined {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.badge.left {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.badge.waiting {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
-.empty-state {
-  padding: 22px;
-  border: 1px dashed #d1d5db;
-  border-radius: 16px;
-  text-align: center;
-  color: #6b7280;
-  background: #fafafa;
-}
-
-.error {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-.btn {
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 16px;
-  background: #111827;
-  color: white;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-@media (max-width: 900px) {
-  .panel-header,
-  .readiness-card {
+@media (max-width: 960px) {
+  .readiness-meta-grid {
     grid-template-columns: 1fr;
-    flex-direction: column;
+    max-width: 100%;
   }
 
-  .meta {
-    grid-template-columns: 1fr;
-  }
-
-  .panel-header .btn {
-    width: 100%;
+  .stat-box {
+    flex: 1 1 calc(50% - 12px);
+    min-width: 0;
   }
 }
 </style>

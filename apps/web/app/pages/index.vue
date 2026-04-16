@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch } from '#imports'
+import { useAuth } from '~/composables/useAuth'
 
 definePageMeta({
   middleware: 'auth',
@@ -253,16 +254,14 @@ const goToClassroom = async (id: number) => {
   await navigateTo(`/classes/${id}`)
 }
 
-const logout = async () => {
-  try {
-    await $fetch('/api/logout', {
-      method: 'POST',
-    })
-  } catch {
-    // ignore logout API errors
-  }
+const { logout } = useAuth()
 
-  await navigateTo('/login')
+const handleLogout = async () => {
+  try {
+    await logout()
+  } finally {
+    await navigateTo('/login')
+  }
 }
 
 const startAutoRefresh = () => {
@@ -383,7 +382,7 @@ const classroomStatusLabel = (status?: string | null) => {
               size="large"
               rounded="pill"
               prepend-icon="mdi-logout"
-              @click="logout"
+              @click="handleLogout"
             >
               Logout
             </v-btn>

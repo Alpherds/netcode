@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 type StudentProfile = {
   id: number
@@ -36,7 +36,51 @@ const searchTouched = ref(false)
 const addingStudentId = ref<number | null>(null)
 const removingEnrollmentId = ref<number | null>(null)
 
+const feedbackType = ref<'success' | 'error' | 'info' | 'warning'>('success')
+const feedbackMessage = ref('')
+const showFeedback = ref(false)
+
+let feedbackTimer: ReturnType<typeof setTimeout> | null = null
+
 const filteredEnrolled = computed(() => enrolled.value ?? [])
+
+const showToast = (
+  type: 'success' | 'error' | 'info' | 'warning',
+  message: string
+) => {
+  feedbackType.value = type
+  feedbackMessage.value = message
+  showFeedback.value = true
+
+  if (feedbackTimer) {
+    clearTimeout(feedbackTimer)
+  }
+
+  feedbackTimer = setTimeout(() => {
+    showFeedback.value = false
+  }, 3000)
+}
+
+const studentInitial = (name?: string | null) =>
+  String(name || 'S').trim().charAt(0).toUpperCase()
+
+const studentMeta = (student?: StudentProfile | null) => {
+  return [
+    student?.student_no || 'No student number',
+    student?.program || '',
+    student?.year_level || '',
+    student?.section || '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+const resetSearchState = () => {
+  search.value = ''
+  searchResults.value = []
+  searchError.value = ''
+  searchTouched.value = false
+}
 
 const loadEnrollments = async () => {
   enrolledLoading.value = true
@@ -81,15 +125,13 @@ const toggleAddStudent = async () => {
   if (showAddStudent.value) {
     await runSearch()
   } else {
-    search.value = ''
-    searchResults.value = []
-    searchError.value = ''
-    searchTouched.value = false
+    resetSearchState()
   }
 }
 
 const addStudent = async (studentId: number) => {
   addingStudentId.value = studentId
+  searchError.value = ''
 
   try {
     await $fetch(`/api/classrooms/${props.classroomId}/enrollments`, {
@@ -99,11 +141,14 @@ const addStudent = async (studentId: number) => {
 
     await loadEnrollments()
     await runSearch()
+    showToast('success', 'Student enrolled successfully.')
   } catch (error: any) {
     searchError.value =
       error?.data?.message ||
       error?.statusMessage ||
       'Failed to enroll student.'
+
+    showToast('error', searchError.value)
   } finally {
     addingStudentId.value = null
   }
@@ -111,6 +156,7 @@ const addStudent = async (studentId: number) => {
 
 const dropEnrollment = async (enrollmentId: number) => {
   removingEnrollmentId.value = enrollmentId
+  enrolledError.value = ''
 
   try {
     await $fetch(`/api/enrollments/${enrollmentId}/drop`, {
@@ -122,11 +168,15 @@ const dropEnrollment = async (enrollmentId: number) => {
     if (showAddStudent.value) {
       await runSearch()
     }
+
+    showToast('success', 'Student dropped successfully.')
   } catch (error: any) {
     enrolledError.value =
       error?.data?.message ||
       error?.statusMessage ||
       'Failed to drop student.'
+
+    showToast('error', enrolledError.value)
   } finally {
     removingEnrollmentId.value = null
   }
@@ -143,296 +193,251 @@ watch(search, async (value) => {
 onMounted(async () => {
   await loadEnrollments()
 })
+
+onBeforeUnmount(() => {
+  if (feedbackTimer) {
+    clearTimeout(feedbackTimer)
+    feedbackTimer = null
+  }
+})
 </script>
 
 <template>
-  <section class="panel">
-    <div class="panel-header">
+  <div class="enrollment-manager">
+    <v-alert
+      v-if="showFeedback"
+      v-model="showFeedback"
+      :type="feedbackType"
+      variant="tonal"
+      closable
+      class="mb-4"
+    >
+      {{ feedbackMessage }}
+    </v-alert>
+
+    <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-5">
       <div>
-        <h2>Enrollments</h2>
-        <p class="panel-subtitle">
+        <div class="text-h5 font-weight-bold">Enrollments</div>
+        <div class="text-body-2 text-medium-emphasis">
           Manage which students can access this classroom and its live sessions.
-        </p>
+        </div>
       </div>
 
-      <div class="panel-actions">
-        <span class="count">{{ filteredEnrolled.length }}</span>
+      <div class="d-flex align-center flex-wrap ga-2 w-100 w-md-auto justify-end">
+        <v-chip color="primary" variant="tonal" rounded="pill">
+          {{ filteredEnrolled.length }}
+        </v-chip>
 
-        <button
+        <v-btn
           v-if="canManage"
-          class="btn btn-secondary"
+          color="primary"
+          rounded="pill"
+          prepend-icon="mdi-account-plus-outline"
           @click="toggleAddStudent"
         >
           {{ showAddStudent ? 'Close Add Student' : 'Add Student' }}
-        </button>
+        </v-btn>
       </div>
     </div>
 
-    <div v-if="canManage && showAddStudent" class="search-panel">
-      <label>Find Students</label>
-
-      <div class="search-row">
-        <input
-          v-model="search"
-          type="text"
-          placeholder="Search by display name"
-          @keyup.enter="runSearch"
-        />
-        <button
-          class="btn btn-primary"
-          :disabled="searchLoading"
-          @click="runSearch"
-        >
-          {{ searchLoading ? 'Searching...' : 'Search' }}
-        </button>
-      </div>
-
-      <p class="helper">
-        Leave the search blank to browse available students.
-      </p>
-
-      <p v-if="searchError" class="helper error-text">{{ searchError }}</p>
-
-      <div v-if="searchLoading" class="empty-state">
-        Searching students...
-      </div>
-
-      <div
-        v-else-if="searchTouched && !searchResults.length"
-        class="empty-state"
+    <v-expand-transition>
+      <v-card
+        v-if="canManage && showAddStudent"
+        rounded="xl"
+        elevation="1"
+        class="search-panel mb-5"
       >
-        No matching students found.
-      </div>
+        <v-card-text class="pa-4 pa-md-5">
+          <div class="text-subtitle-1 font-weight-bold mb-3">Find Students</div>
 
-      <div v-else-if="searchResults.length" class="student-results">
-        <article
-          v-for="student in searchResults"
-          :key="student.id"
-          class="student-card"
-        >
-          <div>
-            <strong>{{ student.display_name || 'Unnamed student' }}</strong>
-            <p>
-              {{ student.student_no || 'No student number' }}
-              <span v-if="student.program"> · {{ student.program }}</span>
-              <span v-if="student.year_level"> · {{ student.year_level }}</span>
-              <span v-if="student.section"> · {{ student.section }}</span>
-            </p>
+          <div class="d-flex flex-column flex-md-row ga-3 mb-2">
+            <v-text-field
+              v-model="search"
+              label="Search students"
+              placeholder="Search by display name"
+              prepend-inner-icon="mdi-magnify"
+              hide-details
+              class="flex-grow-1"
+              @keyup.enter="runSearch"
+            />
+
+            <v-btn
+              color="primary"
+              rounded="pill"
+              size="large"
+              :loading="searchLoading"
+              @click="runSearch"
+            >
+              Search
+            </v-btn>
           </div>
 
-          <button
-            class="btn btn-secondary"
-            :disabled="addingStudentId === student.id"
-            @click="addStudent(student.id)"
+          <div class="text-body-2 text-medium-emphasis mb-4">
+            Leave the search blank to browse available students.
+          </div>
+
+          <v-alert
+            v-if="searchError"
+            type="error"
+            variant="tonal"
+            class="mb-4"
           >
-            {{ addingStudentId === student.id ? 'Adding...' : 'Enroll' }}
-          </button>
-        </article>
-      </div>
+            {{ searchError }}
+          </v-alert>
+
+          <div v-if="searchLoading" class="empty-wrap">
+            <v-progress-circular indeterminate color="primary" />
+            <div class="mt-3 text-medium-emphasis">Searching students...</div>
+          </div>
+
+          <v-alert
+            v-else-if="searchTouched && !searchResults.length"
+            type="info"
+            variant="tonal"
+          >
+            No matching students found.
+          </v-alert>
+
+          <v-row v-else-if="searchResults.length" dense>
+            <v-col
+              v-for="student in searchResults"
+              :key="student.id"
+              cols="12"
+            >
+              <v-card rounded="xl" elevation="1" class="student-card">
+                <v-card-text class="pa-4">
+                  <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-4">
+                    <div class="d-flex align-center ga-3 min-w-0">
+                      <v-avatar color="primary" variant="tonal" size="48">
+                        {{ studentInitial(student.display_name) }}
+                      </v-avatar>
+
+                      <div class="min-w-0">
+                        <div class="text-subtitle-1 font-weight-bold text-truncate">
+                          {{ student.display_name || 'Unnamed student' }}
+                        </div>
+                        <div class="text-body-2 text-medium-emphasis">
+                          {{ studentMeta(student) }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <v-btn
+                      color="primary"
+                      rounded="pill"
+                      :loading="addingStudentId === student.id"
+                      @click="addStudent(student.id)"
+                    >
+                      Enroll
+                    </v-btn>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+    </v-expand-transition>
+
+    <div v-if="enrolledLoading" class="empty-wrap">
+      <v-progress-circular indeterminate color="primary" />
+      <div class="mt-3 text-medium-emphasis">Loading enrolled students...</div>
     </div>
 
-    <div v-if="enrolledLoading" class="empty-state">
-      Loading enrolled students...
-    </div>
-
-    <div v-else-if="enrolledError" class="empty-state error">
+    <v-alert
+      v-else-if="enrolledError"
+      type="error"
+      variant="tonal"
+    >
       {{ enrolledError }}
-    </div>
+    </v-alert>
 
-    <div v-else-if="!filteredEnrolled.length" class="empty-state">
+    <v-alert
+      v-else-if="!filteredEnrolled.length"
+      type="info"
+      variant="tonal"
+    >
       No enrolled students yet.
-    </div>
+    </v-alert>
 
-    <div v-else class="enrollment-list">
-      <article
+    <v-row v-else dense>
+      <v-col
         v-for="item in filteredEnrolled"
         :key="item.id"
-        class="enrollment-card"
+        cols="12"
       >
-        <div>
-          <strong>{{ item.student?.display_name || 'Unnamed student' }}</strong>
-          <p>
-            {{ item.student?.student_no || 'No student number' }}
-            <span v-if="item.student?.program"> · {{ item.student.program }}</span>
-            <span v-if="item.student?.year_level"> · {{ item.student.year_level }}</span>
-            <span v-if="item.student?.section"> · {{ item.student.section }}</span>
-          </p>
-        </div>
+        <v-card rounded="xl" elevation="1" class="enrollment-card">
+          <v-card-text class="pa-4">
+            <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-4">
+              <div class="d-flex align-center ga-3 min-w-0">
+                <v-avatar color="secondary" variant="tonal" size="48">
+                  {{ studentInitial(item.student?.display_name) }}
+                </v-avatar>
 
-        <button
-          v-if="canManage"
-          class="btn btn-danger"
-          :disabled="removingEnrollmentId === item.id"
-          @click="dropEnrollment(item.id)"
-        >
-          {{ removingEnrollmentId === item.id ? 'Dropping...' : 'Drop' }}
-        </button>
-      </article>
-    </div>
-  </section>
+                <div class="min-w-0">
+                  <div class="text-subtitle-1 font-weight-bold text-truncate">
+                    {{ item.student?.display_name || 'Unnamed student' }}
+                  </div>
+                  <div class="text-body-2 text-medium-emphasis">
+                    {{ studentMeta(item.student) }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="d-flex align-center flex-wrap ga-2 w-100 w-md-auto justify-end">
+                <v-chip color="success" variant="tonal" rounded="pill" size="small">
+                  {{ item.enrollment_status || 'ACTIVE' }}
+                </v-chip>
+
+                <v-btn
+                  v-if="canManage"
+                  color="error"
+                  rounded="pill"
+                  :loading="removingEnrollmentId === item.id"
+                  @click="dropEnrollment(item.id)"
+                >
+                  Drop
+                </v-btn>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+  </div>
 </template>
 
 <style scoped>
-.panel {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 20px;
-  padding: 22px;
-  margin-bottom: 20px;
+.enrollment-manager {
+  width: 100%;
 }
 
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.panel-header h2 {
-  margin: 0;
-}
-
-.panel-subtitle {
-  margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.panel-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.count {
-  min-width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #eef2ff;
-  color: #4338ca;
-  font-weight: 700;
-}
-
-.search-panel {
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 18px;
-  background: #fafcff;
-  margin-bottom: 18px;
-}
-
-.search-panel label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #374151;
-}
-
-.search-row {
-  display: flex;
-  gap: 10px;
-}
-
-.search-row input {
-  flex: 1;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  padding: 12px 14px;
-  font: inherit;
-}
-
-.helper {
-  margin: 10px 0 0;
-  font-size: 14px;
-  color: #6b7280;
-}
-
-.error-text {
-  color: #b91c1c;
-}
-
-.student-results,
-.enrollment-list {
-  display: grid;
-  gap: 12px;
-  margin-top: 14px;
-}
-
+.search-panel,
 .student-card,
 .enrollment-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 16px;
-  background: #fcfdff;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
 }
 
-.student-card p,
-.enrollment-card p {
-  margin: 6px 0 0;
-  color: #6b7280;
-}
-
-.empty-state {
-  padding: 22px;
-  border: 1px dashed #d1d5db;
-  border-radius: 16px;
+.empty-wrap {
+  padding: 28px;
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 20px;
   text-align: center;
-  color: #6b7280;
-  background: #fafafa;
+  background: rgba(248, 250, 252, 0.9);
 }
 
-.error {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
+.min-w-0 {
+  min-width: 0;
 }
 
-.btn {
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 16px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn-primary {
-  background: #111827;
-  color: white;
-}
-
-.btn-secondary {
-  background: #4f46e5;
-  color: white;
-}
-
-.btn-danger {
-  background: #dc2626;
-  color: white;
-}
-
-@media (max-width: 800px) {
-  .panel-header,
-  .search-row,
-  .student-card,
-  .enrollment-card {
-    flex-direction: column;
+@media (max-width: 960px) {
+  .w-md-auto {
+    width: 100%;
   }
 
-  .student-card .btn,
-  .enrollment-card .btn,
-  .search-row .btn,
-  .panel-actions .btn {
-    width: 100%;
+  .text-truncate {
+    white-space: normal;
   }
 }
 </style>

@@ -4,6 +4,33 @@ type SessionUser = {
   email: string
 }
 
+type RegisterRole = 'STUDENT' | 'INSTRUCTOR'
+
+type RegisterPayload = {
+  display_name: string
+  username: string
+  email: string
+  password: string
+  confirmPassword: string
+  role_label: RegisterRole
+}
+
+type RegisterResponse = {
+  ok: boolean
+  message: string
+  requires_email_confirmation: boolean
+  user: {
+    id: number
+    username: string
+    email: string
+    confirmed?: boolean
+  }
+  profile: {
+    display_name: string
+    role_label: RegisterRole
+  }
+}
+
 export const useAuth = () => {
   const user = useState<SessionUser | null>('auth.user', () => null)
   const loggedIn = computed(() => !!user.value)
@@ -23,6 +50,16 @@ export const useAuth = () => {
     })
 
     user.value = response.user
+    return response
+  }
+
+  const register = async (payload: RegisterPayload) => {
+    const response = await $fetch<RegisterResponse>('/api/auth/register', {
+      method: 'POST',
+      body: payload,
+    })
+
+    return response
   }
 
   const logout = async () => {
@@ -35,6 +72,7 @@ export const useAuth = () => {
     loggedIn,
     restore,
     login,
+    register,
     logout,
   }
 }
