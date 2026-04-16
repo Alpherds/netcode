@@ -18,10 +18,13 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event)
   const body = await readBody<LoginBody>(event)
 
-  if (!body?.identifier || !body?.password) {
+  const identifier = String(body?.identifier || '').trim()
+  const password = String(body?.password || '')
+
+  if (!identifier || !password) {
     throw createError({
       statusCode: 400,
-      statusMessage: 'Identifier and password are required',
+      statusMessage: 'Email/username and password are required.',
     })
   }
 
@@ -30,7 +33,10 @@ export default defineEventHandler(async (event) => {
       `${config.public.strapiUrl}/api/auth/local`,
       {
         method: 'POST',
-        body,
+        body: {
+          identifier,
+          password,
+        },
       }
     )
 
@@ -63,10 +69,35 @@ export default defineEventHandler(async (event) => {
       user: response.user,
     }
   } catch (error: any) {
+    const rawMessage =
+      error?.data?.error?.message ||
+      error?.statusMessage ||
+      'Invalid email/username or password'
+
+    const normalized = String(rawMessage).toLowerCase()
+
+    if (
+      normalized.includes('confirmed') ||
+      normalized.includes('confirmation')
+    ) {
+      throw createError({
+        statusCode: 403,
+        statusMessage:
+          'Your email is not yet confirmed. Please check your inbox and confirm your account before signing in.',
+      })
+    }
+
+    if (normalized.includes('blocked')) {
+      throw createError({
+        statusCode: 403,
+        statusMessage:
+          'Your account is blocked. Please contact the administrator.',
+      })
+    }
+
     throw createError({
       statusCode: error?.statusCode || 401,
-      statusMessage:
-        error?.data?.error?.message || 'Invalid email/username or password',
+      statusMessage: 'Invalid email/username or password.',
     })
   }
 })

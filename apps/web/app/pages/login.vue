@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { navigateTo, useRoute } from '#imports'
 import { useAuth } from '~/composables/useAuth'
 
@@ -29,6 +29,8 @@ const registerSuccessMessage = ref('')
 
 const { login, register, user } = useAuth()
 
+let successTimer: ReturnType<typeof setTimeout> | null = null
+
 const confirmedMessage = computed(() => {
   return route.query.confirmed === '1'
     ? 'Your email has been confirmed. You can now sign in.'
@@ -44,6 +46,29 @@ watch(
   },
   { immediate: true }
 )
+
+watch(activeTab, (value) => {
+  if (value === 'signin') {
+    registerErrorMessage.value = ''
+  } else {
+    loginErrorMessage.value = ''
+  }
+})
+
+const clearSuccessTimer = () => {
+  if (successTimer) {
+    clearTimeout(successTimer)
+    successTimer = null
+  }
+}
+
+const startSuccessTimer = () => {
+  clearSuccessTimer()
+
+  successTimer = setTimeout(() => {
+    registerSuccessMessage.value = ''
+  }, 8000)
+}
 
 const resetRegisterForm = () => {
   registerDisplayName.value = ''
@@ -146,7 +171,9 @@ const submitRegister = async () => {
     identifier.value = registerEmail.value.trim()
     password.value = ''
     activeTab.value = 'signin'
+
     resetRegisterForm()
+    startSuccessTimer()
   } catch (error: any) {
     registerErrorMessage.value =
       error?.data?.message ||
@@ -156,6 +183,10 @@ const submitRegister = async () => {
     isRegistering.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  clearSuccessTimer()
+})
 </script>
 
 <template>
@@ -333,6 +364,7 @@ const submitRegister = async () => {
                       prepend-inner-icon="mdi-account-outline"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isSubmitting"
                       @keyup.enter="submit"
                     />
 
@@ -345,6 +377,7 @@ const submitRegister = async () => {
                       :append-inner-icon="showPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isSubmitting"
                       @click:append-inner="showPassword = !showPassword"
                       @keyup.enter="submit"
                     />
@@ -355,6 +388,7 @@ const submitRegister = async () => {
                       rounded="pill"
                       block
                       :loading="isSubmitting"
+                      :disabled="isSubmitting"
                       prepend-icon="mdi-login"
                       @click="submit"
                     >
@@ -382,6 +416,7 @@ const submitRegister = async () => {
                       prepend-inner-icon="mdi-account-circle-outline"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isRegistering"
                     />
 
                     <v-text-field
@@ -391,6 +426,7 @@ const submitRegister = async () => {
                       prepend-inner-icon="mdi-at"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isRegistering"
                     />
 
                     <v-text-field
@@ -400,6 +436,7 @@ const submitRegister = async () => {
                       prepend-inner-icon="mdi-email-outline"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isRegistering"
                     />
 
                     <v-select
@@ -412,6 +449,7 @@ const submitRegister = async () => {
                       prepend-inner-icon="mdi-account-badge-outline"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isRegistering"
                     />
 
                     <v-text-field
@@ -423,6 +461,7 @@ const submitRegister = async () => {
                       :append-inner-icon="showRegisterPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isRegistering"
                       @click:append-inner="showRegisterPassword = !showRegisterPassword"
                     />
 
@@ -435,6 +474,7 @@ const submitRegister = async () => {
                       :append-inner-icon="showRegisterConfirmPassword ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
                       rounded="xl"
                       hide-details="auto"
+                      :disabled="isRegistering"
                       @click:append-inner="showRegisterConfirmPassword = !showRegisterConfirmPassword"
                     />
 
@@ -444,6 +484,7 @@ const submitRegister = async () => {
                       rounded="pill"
                       block
                       :loading="isRegistering"
+                      :disabled="isRegistering"
                       prepend-icon="mdi-account-plus-outline"
                       @click="submitRegister"
                     >
@@ -593,4 +634,4 @@ const submitRegister = async () => {
     row-gap: 12px;
   }
 }
-</style>
+</style> 
