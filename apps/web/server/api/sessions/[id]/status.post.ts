@@ -6,32 +6,56 @@ type StatusBody = {
   meeting_status: SessionStatus
 }
 
-type SessionRecord = {
-  id: number
-  documentId?: string
-  title?: string
-  starts_at?: string
-  ends_at?: string
-  room_name?: string
-  meeting_provider?: string
-  meeting_status?: SessionStatus
-  notes?: string
-  classroom?: {
-    id?: number
-    title?: string
-    code?: string
-    term?: string
-    [key: string]: unknown
-  } | null
-  [key: string]: unknown
-}
-
 type StrapiCollectionResponse<T> = {
   data: T[]
 }
 
 type StrapiSingleResponse<T> = {
   data: T
+}
+
+type StrapiMe = {
+  id: number
+  username: string
+  email?: string
+}
+
+type ProfileRecord = {
+  id: number
+  documentId?: string
+  display_name?: string | null
+  role_label?: string | null
+  auth_user_id?: number | null
+  [key: string]: unknown
+}
+
+type ClassroomRef = {
+  id?: number
+  title?: string | null
+  code?: string | null
+  term?: string | null
+  [key: string]: unknown
+}
+
+type ClassroomRecord = {
+  id: number
+  documentId?: string
+  instructor?: ProfileRecord | null
+  [key: string]: unknown
+}
+
+type SessionRecord = {
+  id: number
+  documentId?: string
+  title?: string | null
+  starts_at?: string | null
+  ends_at?: string | null
+  room_name?: string | null
+  meeting_provider?: string | null
+  meeting_status?: SessionStatus | null
+  notes?: string | null
+  classroom?: ClassroomRef | null
+  [key: string]: unknown
 }
 
 export default defineEventHandler(async (event): Promise<SessionRecord> => {
@@ -70,13 +94,41 @@ export default defineEventHandler(async (event): Promise<SessionRecord> => {
     })
   }
 
+  const strapiUrl = String(config.public.strapiUrl || '').replace(/\/$/, '')
+  const headers = {
+    Authorization: `Bearer ${jwt}`,
+  }
+
+  const me = await $fetch<StrapiMe>(`${strapiUrl}/api/users/me`, {
+    headers,
+  })
+
+  const profileResponse = await $fetch<StrapiCollectionResponse<ProfileRecord>>(
+    `${strapiUrl}/api/profiles?filters[auth_user_id][$eq]=${me.id}`,
+    { headers }
+  )
+
+  const profile = profileResponse.data?.[0]
+
+  if (!profile) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Profile not found',
+    })
+  }
+
+  const roleLabel = String(profile.role_label || '').toUpperCase()
+
+  if (roleLabel !== 'ADMIN' && roleLabel !== 'INSTRUCTOR') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'You do not have permission to update session status',
+    })
+  }
+
   const existing = await $fetch<StrapiCollectionResponse<SessionRecord>>(
-    `${config.public.strapiUrl}/api/class-sessions?filters[id][$eq]=${id}&populate=classroom`,
-    {
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-      },
-    }
+    `${strapiUrl}/api/class-sessions?filters[id][$eq]=${id}&populate=classroom`,
+    { headers }
   )
 
   const session = existing.data?.[0]
@@ -88,13 +140,34 @@ export default defineEventHandler(async (event): Promise<SessionRecord> => {
     })
   }
 
+  const classroomId = session.classroom?.id
+
+  if (!classroomId) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Session classroom not found',
+    })
+  }
+
+  if (roleLabel === 'INSTRUCTOR') {
+    const classroomResponse = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
+      `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&filters[instructor][id][$eq]=${profile.id}&populate=instructor`,
+      { headers }
+    )
+
+    if (!classroomResponse.data?.[0]) {
+      throw createError({
+        statusCode: 403,
+        statusMessage: 'You do not own this classroom session',
+      })
+    }
+  }
+
   await $fetch<StrapiSingleResponse<SessionRecord>>(
-    `${config.public.strapiUrl}/api/class-sessions/${session.documentId}`,
+    `${strapiUrl}/api/class-sessions/${session.documentId}`,
     {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-      },
+      headers,
       body: {
         data: {
           meeting_status: body.meeting_status,
@@ -104,12 +177,8 @@ export default defineEventHandler(async (event): Promise<SessionRecord> => {
   )
 
   const refreshed = await $fetch<StrapiCollectionResponse<SessionRecord>>(
-    `${config.public.strapiUrl}/api/class-sessions?filters[id][$eq]=${id}&populate=classroom`,
-    {
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-      },
-    }
+    `${strapiUrl}/api/class-sessions?filters[id][$eq]=${id}&populate=classroom`,
+    { headers }
   )
 
   const updatedSession = refreshed.data?.[0]

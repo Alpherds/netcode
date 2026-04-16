@@ -1,4 +1,4 @@
-import { createError, getCookie, getRouterParam, readBody } from 'h3'
+import { createError, getCookie, getRouterParam } from 'h3'
 
 type StrapiCollectionResponse<T> = { data: T[] }
 type StrapiSingleResponse<T> = { data: T }
@@ -23,19 +23,14 @@ type ClassroomRecord = {
 type EnrollmentRecord = {
   id: number
   documentId?: string
-  enrollment_status?: string | null
+  classroom?: ClassroomRecord | null
   [key: string]: unknown
-}
-
-type Body = {
-  studentId?: number
 }
 
 export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
   const config = useRuntimeConfig(event)
   const jwt = getCookie(event, 'netcode_jwt')
-  const classroomId = getRouterParam(event, 'id')
-  const body = await readBody<Body>(event)
+  const enrollmentId = getRouterParam(event, 'id')
 
   if (!jwt) {
     throw createError({
@@ -44,17 +39,10 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
     })
   }
 
-  if (!classroomId) {
+  if (!enrollmentId) {
     throw createError({
       statusCode: 400,
-      statusMessage: 'Classroom id is required',
-    })
-  }
-
-  if (!body?.studentId) {
-    throw createError({
-      statusCode: 400,
-      statusMessage: 'Student id is required',
+      statusMessage: 'Enrollment id is required',
     })
   }
 
@@ -84,7 +72,22 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
   if (role !== 'ADMIN' && role !== 'INSTRUCTOR') {
     throw createError({
       statusCode: 403,
-      statusMessage: 'You do not have access to enroll students',
+      statusMessage: 'You do not have access to drop enrollments',
+    })
+  }
+
+  const enrollmentRes = await $fetch<StrapiCollectionResponse<EnrollmentRecord>>(
+    `${strapiUrl}/api/enrollments?filters[id][$eq]=${enrollmentId}&populate=classroom`,
+    { headers }
+  )
+
+  const enrollment = enrollmentRes.data?.[0]
+  const classroomId = enrollment?.classroom?.id
+
+  if (!enrollment?.documentId || !classroomId) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Enrollment not found',
     })
   }
 
@@ -102,44 +105,18 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
     }
   }
 
-  const existingRes = await $fetch<StrapiCollectionResponse<EnrollmentRecord>>(
-    `${strapiUrl}/api/enrollments?filters[classroom][id][$eq]=${classroomId}&filters[student][id][$eq]=${body.studentId}`,
-    { headers }
-  )
-
-  const existing = existingRes.data?.[0]
-
-  if (existing?.documentId) {
-    const updated = await $fetch<StrapiSingleResponse<EnrollmentRecord>>(
-      `${strapiUrl}/api/enrollments/${existing.documentId}`,
-      {
-        method: 'PUT',
-        headers,
-        body: {
-          data: {
-            enrollment_status: 'ACTIVE',
-          },
-        },
-      }
-    )
-
-    return updated.data
-  }
-
-  const created = await $fetch<StrapiSingleResponse<EnrollmentRecord>>(
-    `${strapiUrl}/api/enrollments`,
+  const updated = await $fetch<StrapiSingleResponse<EnrollmentRecord>>(
+    `${strapiUrl}/api/enrollments/${enrollment.documentId}`,
     {
-      method: 'POST',
+      method: 'PUT',
       headers,
       body: {
         data: {
-          enrollment_status: 'ACTIVE',
-          classroom: Number(classroomId),
-          student: body.studentId,
+          enrollment_status: 'DROPPED',
         },
       },
     }
   )
 
-  return created.data
+  return updated.data
 })
