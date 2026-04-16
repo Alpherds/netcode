@@ -1,23 +1,22 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch } from '#imports'
-import { useAuth } from '~/composables/useAuth'
 
 definePageMeta({
   middleware: 'auth',
 })
 
-type Profile = {
+type ProfileItem = {
   id: number
   display_name?: string | null
-  role_label?: 'STUDENT' | 'INSTRUCTOR' | 'ADMIN' | string | null
+  role_label?: string | null
   student_no?: string | null
   employee_no?: string | null
   program?: string | null
-  year_level?: number | null
+  year_level?: string | number | null
   section?: string | null
   is_active?: boolean | null
-  auth_user_id?: number | null
+  avatar?: string | null
 }
 
 type Classroom = {
@@ -29,7 +28,7 @@ type Classroom = {
   class_status?: 'OPEN' | 'CLOSED' | 'ARCHIVED' | string | null
 }
 
-type ClassroomForm = {
+type CreateClassroomForm = {
   title: string
   code: string
   description: string
@@ -37,16 +36,11 @@ type ClassroomForm = {
   class_status: 'OPEN' | 'CLOSED' | 'ARCHIVED'
 }
 
-type ClassroomTab = 'ACTIVE' | 'ARCHIVED'
+defineOptions({
+  name: 'DashboardPage',
+})
 
-const { user, logout } = useAuth()
-
-const {
-  data: profile,
-  pending: profilePending,
-  error: profileError,
-  refresh: refreshProfile,
-} = await useFetch<Profile | null>('/api/profile')
+const { data: profile } = await useFetch<ProfileItem>('/api/profile')
 
 const {
   data: classrooms,
@@ -55,60 +49,75 @@ const {
   refresh: refreshClassrooms,
 } = await useFetch<Classroom[]>('/api/classrooms')
 
-const safeProfile = computed(() => profile.value ?? null)
+const roleLabel = computed(() =>
+  String(profile.value?.role_label || '').toUpperCase()
+)
+
+const isInstructor = computed(() => roleLabel.value === 'INSTRUCTOR')
 const safeClassrooms = computed(() => classrooms.value ?? [])
 
-const currentTab = ref<ClassroomTab>('ACTIVE')
-
-const displayName = computed(() => {
-  if (safeProfile.value?.display_name) return safeProfile.value.display_name
-  if (user.value?.username) return user.value.username
-  return 'User'
-})
-
-const roleLabel = computed(() => safeProfile.value?.role_label || 'Authenticated User')
-
-const canCreateClassroom = computed(() => {
-  const role = String(safeProfile.value?.role_label || '').toUpperCase()
-  return role === 'INSTRUCTOR' || role === 'ADMIN'
-})
-
-const idLabel = computed(() => {
-  if (safeProfile.value?.employee_no) return `Employee No: ${safeProfile.value.employee_no}`
-  if (safeProfile.value?.student_no) return `Student No: ${safeProfile.value.student_no}`
-  return 'No ID assigned'
-})
-
-const activeClassesCount = computed(() =>
-  safeClassrooms.value.filter((c) => String(c.class_status || '').toUpperCase() !== 'ARCHIVED').length
-)
-
-const archivedClassesCount = computed(() =>
-  safeClassrooms.value.filter((c) => String(c.class_status || '').toUpperCase() === 'ARCHIVED').length
-)
-
-const filteredClassrooms = computed(() => {
-  if (currentTab.value === 'ARCHIVED') {
-    return safeClassrooms.value.filter(
-      (c) => String(c.class_status || '').toUpperCase() === 'ARCHIVED'
-    )
-  }
-
-  return safeClassrooms.value.filter(
-    (c) => String(c.class_status || '').toUpperCase() !== 'ARCHIVED'
+const activeClassrooms = computed(() =>
+  safeClassrooms.value.filter(
+    (item) => String(item.class_status || '').toUpperCase() !== 'ARCHIVED'
   )
+)
+
+const archivedClassrooms = computed(() =>
+  safeClassrooms.value.filter(
+    (item) => String(item.class_status || '').toUpperCase() === 'ARCHIVED'
+  )
+)
+
+const search = ref('')
+const activeTab = ref<'active' | 'archived'>('active')
+
+const filteredActiveClassrooms = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+
+  if (!keyword) return activeClassrooms.value
+
+  return activeClassrooms.value.filter((item) => {
+    return (
+      String(item.title || '').toLowerCase().includes(keyword) ||
+      String(item.code || '').toLowerCase().includes(keyword) ||
+      String(item.description || '').toLowerCase().includes(keyword) ||
+      String(item.term || '').toLowerCase().includes(keyword)
+    )
+  })
 })
 
-const showCreateClassroom = ref(false)
-const isCreatingClassroom = ref(false)
-const classroomFormError = ref('')
-const classroomFormSuccess = ref('')
+const filteredArchivedClassrooms = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
 
-const updatingClassroomId = ref<number | null>(null)
-const classroomStatusError = ref('')
-const classroomStatusSuccess = ref('')
+  if (!keyword) return archivedClassrooms.value
 
-const classroomForm = ref<ClassroomForm>({
+  return archivedClassrooms.value.filter((item) => {
+    return (
+      String(item.title || '').toLowerCase().includes(keyword) ||
+      String(item.code || '').toLowerCase().includes(keyword) ||
+      String(item.description || '').toLowerCase().includes(keyword) ||
+      String(item.term || '').toLowerCase().includes(keyword)
+    )
+  })
+})
+
+const shouldScrollClassrooms = computed(() => {
+  const count =
+    activeTab.value === 'active'
+      ? filteredActiveClassrooms.value.length
+      : filteredArchivedClassrooms.value.length
+
+  return count > 4
+})
+
+const alertType = ref<'success' | 'error' | 'info' | 'warning'>('success')
+const alertMessage = ref('')
+const showAlert = ref(false)
+
+const showCreateDialog = ref(false)
+const isSubmitting = ref(false)
+
+const createForm = ref<CreateClassroomForm>({
   title: '',
   code: '',
   description: '',
@@ -116,969 +125,941 @@ const classroomForm = ref<ClassroomForm>({
   class_status: 'OPEN',
 })
 
-const resetClassroomForm = () => {
-  classroomForm.value = {
+const autoRefreshSeconds = 20
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+let alertTimer: ReturnType<typeof setTimeout> | null = null
+
+const showAppAlert = (
+  type: 'success' | 'error' | 'info' | 'warning',
+  message: string
+) => {
+  alertType.value = type
+  alertMessage.value = message
+  showAlert.value = true
+
+  if (alertTimer) {
+    clearTimeout(alertTimer)
+  }
+
+  alertTimer = setTimeout(() => {
+    showAlert.value = false
+  }, 3000)
+}
+
+const resetCreateForm = () => {
+  createForm.value = {
     title: '',
     code: '',
     description: '',
     term: '',
     class_status: 'OPEN',
   }
-  classroomFormError.value = ''
-  classroomFormSuccess.value = ''
 }
 
-const toggleCreateClassroom = () => {
-  if (!canCreateClassroom.value) return
-
-  showCreateClassroom.value = !showCreateClassroom.value
-
-  if (!showCreateClassroom.value) {
-    resetClassroomForm()
-  }
+const openCreateDialog = () => {
+  resetCreateForm()
+  showCreateDialog.value = true
 }
 
-const submitCreateClassroom = async () => {
-  classroomFormError.value = ''
-  classroomFormSuccess.value = ''
+const closeCreateDialog = () => {
+  showCreateDialog.value = false
+  resetCreateForm()
+}
 
-  if (!classroomForm.value.title.trim()) {
-    classroomFormError.value = 'Classroom title is required.'
+const createClassroom = async () => {
+  const title = createForm.value.title.trim()
+  const code = createForm.value.code.trim()
+  const description = createForm.value.description.trim()
+  const term = createForm.value.term.trim()
+  const classStatus = createForm.value.class_status
+
+  if (!title) {
+    showAppAlert('error', 'Classroom title is required.')
     return
   }
 
-  if (!classroomForm.value.code.trim()) {
-    classroomFormError.value = 'Classroom code is required.'
+  if (!code) {
+    showAppAlert('error', 'Classroom code is required.')
     return
   }
 
-  if (!classroomForm.value.term.trim()) {
-    classroomFormError.value = 'Term is required.'
+  if (!term) {
+    showAppAlert('error', 'Term is required.')
     return
   }
 
-  isCreatingClassroom.value = true
+  isSubmitting.value = true
 
   try {
-    const createClassroomUrl: string = '/api/classrooms'
-
-    await $fetch(createClassroomUrl, {
+    await $fetch('/api/classrooms', {
       method: 'POST',
       body: {
-        title: classroomForm.value.title,
-        code: classroomForm.value.code,
-        description: classroomForm.value.description,
-        term: classroomForm.value.term,
-        class_status: classroomForm.value.class_status,
+        title,
+        code,
+        description,
+        term,
+        class_status: classStatus,
       },
     })
 
-    classroomFormSuccess.value = 'Classroom created successfully.'
+    closeCreateDialog()
     await refreshClassrooms()
-    resetClassroomForm()
-    showCreateClassroom.value = false
-    currentTab.value = 'ACTIVE'
+    showAppAlert('success', 'Classroom created successfully.')
   } catch (error: any) {
-    classroomFormError.value =
+    showAppAlert(
+      'error',
       error?.data?.message ||
-      error?.statusMessage ||
-      'Failed to create classroom.'
+        error?.statusMessage ||
+        'Failed to create classroom.'
+    )
   } finally {
-    isCreatingClassroom.value = false
+    isSubmitting.value = false
   }
 }
 
 const updateClassroomStatus = async (
   classroomId: number,
-  nextStatus: 'OPEN' | 'CLOSED' | 'ARCHIVED'
+  status: 'OPEN' | 'CLOSED' | 'ARCHIVED'
 ) => {
-  classroomStatusError.value = ''
-  classroomStatusSuccess.value = ''
-  updatingClassroomId.value = classroomId
-
   try {
-    const updateStatusUrl: string = `/api/classrooms/${classroomId}/status`
-
-    await $fetch(updateStatusUrl, {
+    await $fetch(`/api/classrooms/${classroomId}/status`, {
       method: 'POST',
       body: {
-        class_status: nextStatus,
+        class_status: status,
       },
     })
 
-    classroomStatusSuccess.value = `Classroom marked as ${nextStatus}.`
     await refreshClassrooms()
 
-    if (nextStatus === 'ARCHIVED') {
-      currentTab.value = 'ACTIVE'
-    }
+    const statusLabel =
+      status === 'OPEN'
+        ? 'reopened'
+        : status === 'CLOSED'
+          ? 'closed'
+          : 'archived'
 
-    if (nextStatus === 'OPEN') {
-      currentTab.value = 'ACTIVE'
-    }
+    showAppAlert('success', `Classroom ${statusLabel} successfully.`)
   } catch (error: any) {
-    classroomStatusError.value =
+    showAppAlert(
+      'error',
       error?.data?.message ||
-      error?.statusMessage ||
-      'Failed to update classroom status.'
-  } finally {
-    updatingClassroomId.value = null
+        error?.statusMessage ||
+        'Failed to update classroom status.'
+    )
   }
 }
 
-const canOpenClassroom = (status?: string | null) => status !== 'OPEN'
-const canCloseClassroom = (status?: string | null) => status === 'OPEN'
-const canArchiveClassroom = (status?: string | null) => status !== 'ARCHIVED'
+const goToClassroom = async (id: number) => {
+  await navigateTo(`/classes/${id}`)
+}
 
-const doLogout = async () => {
-  await logout()
+const logout = async () => {
+  try {
+    await $fetch('/api/logout', {
+      method: 'POST',
+    })
+  } catch {
+    // ignore logout API errors
+  }
+
   await navigateTo('/login')
 }
 
-const refreshAll = async () => {
-  await Promise.all([refreshProfile(), refreshClassrooms()])
+const startAutoRefresh = () => {
+  if (refreshTimer) return
+
+  refreshTimer = setInterval(async () => {
+    await refreshClassrooms()
+  }, autoRefreshSeconds * 1000)
 }
 
-const badgeClass = (status?: string | null) => {
-  switch (status) {
-    case 'OPEN':
-      return 'badge badge-open'
-    case 'CLOSED':
-      return 'badge badge-closed'
-    case 'ARCHIVED':
-      return 'badge badge-archived'
-    default:
-      return 'badge'
+const stopAutoRefresh = () => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
   }
 }
 
-const openClassroom = async (id: number) => {
-  await navigateTo(`/classes/${id}`)
+onMounted(() => {
+  startAutoRefresh()
+})
+
+onBeforeUnmount(() => {
+  stopAutoRefresh()
+
+  if (alertTimer) {
+    clearTimeout(alertTimer)
+    alertTimer = null
+  }
+})
+
+const classroomStatusColor = (status?: string | null) => {
+  const normalized = String(status || '').toUpperCase()
+
+  if (normalized === 'OPEN') return 'success'
+  if (normalized === 'CLOSED') return 'warning'
+  if (normalized === 'ARCHIVED') return 'grey'
+  return 'grey'
+}
+
+const classroomStatusLabel = (status?: string | null) => {
+  const normalized = String(status || '').toUpperCase()
+
+  if (normalized === 'OPEN') return 'Open'
+  if (normalized === 'CLOSED') return 'Closed'
+  if (normalized === 'ARCHIVED') return 'Archived'
+  return normalized || 'Unknown'
 }
 </script>
 
 <template>
-  <div class="dashboard-page">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">Netcode</p>
-        <h1>Dashboard</h1>
-        <p class="subtitle">
-          Welcome back, {{ displayName }}.
-        </p>
-      </div>
+  <v-container fluid class="dashboard pa-4 pa-md-6">
+    <v-alert
+      v-if="showAlert"
+      v-model="showAlert"
+      :type="alertType"
+      variant="tonal"
+      closable
+      class="mb-4"
+    >
+      {{ alertMessage }}
+    </v-alert>
 
-      <div class="hero-actions">
-        <button class="btn btn-secondary" @click="refreshAll">
-          Refresh
-        </button>
-        <button class="btn btn-danger" @click="doLogout">
-          Logout
-        </button>
-      </div>
-    </header>
-
-    <section class="stats-grid">
-      <article class="stat-card">
-        <span class="stat-label">Logged In As</span>
-        <strong class="stat-value">{{ user?.email || '—' }}</strong>
-      </article>
-
-      <article class="stat-card">
-        <span class="stat-label">Role</span>
-        <strong class="stat-value">{{ roleLabel }}</strong>
-      </article>
-
-      <article class="stat-card">
-        <span class="stat-label">Visible Classrooms</span>
-        <strong class="stat-value">{{ activeClassesCount }}</strong>
-      </article>
-
-      <article class="stat-card">
-        <span class="stat-label">Archived Classrooms</span>
-        <strong class="stat-value">{{ archivedClassesCount }}</strong>
-      </article>
-    </section>
-
-    <section class="content-grid">
-      <article class="panel profile-panel">
-        <div class="panel-header">
-          <h2>Profile Summary</h2>
-          <span
-            class="status-pill"
-            :class="safeProfile?.is_active ? 'status-active' : 'status-inactive'"
-          >
-            {{ safeProfile?.is_active ? 'Active' : 'Inactive' }}
-          </span>
-        </div>
-
-        <div v-if="profilePending" class="empty-state">
-          Loading profile...
-        </div>
-
-        <div v-else-if="profileError" class="empty-state error-state">
-          Failed to load profile.
-        </div>
-
-        <div v-else-if="safeProfile" class="profile-details">
-          <div class="profile-main">
-            <div class="avatar-fallback">
-              {{ displayName.charAt(0).toUpperCase() }}
+    <v-card class="hero-card mb-6" elevation="4" rounded="xl">
+      <v-card-text class="pa-5 pa-md-8">
+        <div class="d-flex flex-column flex-md-row align-start align-md-center justify-space-between ga-4">
+          <div class="d-flex align-start ga-4 hero-left">
+            <div class="logo-shell">
+              <v-img
+                src="/logo.png"
+                alt="NETCODE Logo"
+                contain
+                class="hero-logo-img"
+              />
             </div>
 
             <div>
-              <h3>{{ safeProfile.display_name || 'No display name' }}</h3>
-              <p>{{ roleLabel }}</p>
-              <p>{{ idLabel }}</p>
-            </div>
-          </div>
-
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="info-label">Program</span>
-              <strong>{{ safeProfile.program || '—' }}</strong>
-            </div>
-
-            <div class="info-item">
-              <span class="info-label">Year Level</span>
-              <strong>{{ safeProfile.year_level ?? '—' }}</strong>
-            </div>
-
-            <div class="info-item">
-              <span class="info-label">Section</span>
-              <strong>{{ safeProfile.section || '—' }}</strong>
-            </div>
-
-            <div class="info-item">
-              <span class="info-label">Auth User ID</span>
-              <strong>{{ safeProfile.auth_user_id ?? '—' }}</strong>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="empty-state">
-          No profile found.
-        </div>
-      </article>
-
-      <article class="panel classes-panel">
-        <div class="panel-header">
-          <h2>My Classrooms</h2>
-
-          <div class="classes-header-actions">
-            <span class="panel-count">{{ filteredClassrooms.length }}</span>
-
-            <button
-              v-if="canCreateClassroom"
-              class="btn btn-primary"
-              @click="toggleCreateClassroom"
-            >
-              {{ showCreateClassroom ? 'Close Form' : 'Create Classroom' }}
-            </button>
-          </div>
-        </div>
-
-        <div class="tabs-row">
-          <button
-            class="tab-btn"
-            :class="{ active: currentTab === 'ACTIVE' }"
-            @click="currentTab = 'ACTIVE'"
-          >
-            Active Classrooms
-            <span class="tab-count">{{ activeClassesCount }}</span>
-          </button>
-
-          <button
-            class="tab-btn"
-            :class="{ active: currentTab === 'ARCHIVED' }"
-            @click="currentTab = 'ARCHIVED'"
-          >
-            Archived Classrooms
-            <span class="tab-count">{{ archivedClassesCount }}</span>
-          </button>
-        </div>
-
-        <section
-          v-if="showCreateClassroom && canCreateClassroom"
-          class="create-classroom-box"
-        >
-          <h3>Create Classroom</h3>
-
-          <div class="form-grid">
-            <div class="form-group">
-              <label>Title</label>
-              <input
-                v-model="classroomForm.title"
-                type="text"
-                placeholder="Enter classroom title"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>Code</label>
-              <input
-                v-model="classroomForm.code"
-                type="text"
-                placeholder="Enter classroom code"
-              />
-            </div>
-
-            <div class="form-group full">
-              <label>Description</label>
-              <textarea
-                v-model="classroomForm.description"
-                rows="4"
-                placeholder="Enter classroom description"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>Term</label>
-              <input
-                v-model="classroomForm.term"
-                type="text"
-                placeholder="e.g. 1st Semester AY 2026-2027"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>Status</label>
-              <select v-model="classroomForm.class_status">
-                <option value="OPEN">OPEN</option>
-                <option value="CLOSED">CLOSED</option>
-                <option value="ARCHIVED">ARCHIVED</option>
-              </select>
-            </div>
-          </div>
-
-          <p v-if="classroomFormError" class="form-message form-error">
-            {{ classroomFormError }}
-          </p>
-
-          <p v-if="classroomFormSuccess" class="form-message form-success">
-            {{ classroomFormSuccess }}
-          </p>
-
-          <div class="form-actions">
-            <button
-              class="btn btn-light"
-              :disabled="isCreatingClassroom"
-              @click="resetClassroomForm"
-            >
-              Reset
-            </button>
-
-            <button
-              class="btn btn-primary"
-              :disabled="isCreatingClassroom"
-              @click="submitCreateClassroom"
-            >
-              {{ isCreatingClassroom ? 'Creating...' : 'Save Classroom' }}
-            </button>
-          </div>
-        </section>
-
-        <p v-if="classroomStatusError" class="form-message form-error">
-          {{ classroomStatusError }}
-        </p>
-
-        <p v-if="classroomStatusSuccess" class="form-message form-success">
-          {{ classroomStatusSuccess }}
-        </p>
-
-        <div v-if="classroomsPending" class="empty-state">
-          Loading classrooms...
-        </div>
-
-        <div v-else-if="classroomsError" class="empty-state error-state">
-          Failed to load classrooms.
-        </div>
-
-        <div v-else-if="filteredClassrooms.length === 0" class="empty-state">
-          {{
-            currentTab === 'ARCHIVED'
-              ? 'No archived classrooms yet.'
-              : 'No classrooms available yet.'
-          }}
-        </div>
-
-        <div v-else class="classroom-grid">
-          <article
-            v-for="classroom in filteredClassrooms"
-            :key="classroom.id"
-            class="classroom-card clickable"
-            @click="openClassroom(classroom.id)"
-          >
-            <div class="classroom-top">
-              <div>
-                <h3>{{ classroom.title || 'Untitled Classroom' }}</h3>
-                <p class="class-code">{{ classroom.code || 'No code' }}</p>
+              <div class="text-primary font-weight-bold text-caption text-sm-body-2 mb-1">
+                Interactive Virtual Laboratory
               </div>
 
-              <span :class="badgeClass(classroom.class_status)">
-                {{ classroom.class_status || 'UNKNOWN' }}
-              </span>
+              <div class="text-h4 text-md-h4 font-weight-bold mb-2">
+                Dashboard
+              </div>
+
+              <div class="text-medium-emphasis mb-3">
+                Welcome back, {{ profile?.display_name || 'User' }}.
+              </div>
+
+              <div class="d-flex flex-wrap ga-2">
+                <v-chip
+                  color="primary"
+                  variant="tonal"
+                  prepend-icon="mdi-account-badge-outline"
+                  rounded="pill"
+                >
+                  {{ roleLabel || 'USER' }}
+                </v-chip>
+              </div>
             </div>
+          </div>
 
-            <p class="class-description">
-              {{ classroom.description || 'No description provided.' }}
-            </p>
-
-            <div class="class-meta">
-              <span><strong>Term:</strong> {{ classroom.term || '—' }}</span>
-              <span><strong>ID:</strong> {{ classroom.id }}</span>
-            </div>
-
-            <div
-              v-if="canCreateClassroom"
-              class="classroom-actions"
-              @click.stop
+          <div class="d-flex flex-wrap ga-2 hero-actions">
+            <v-btn
+              v-if="isInstructor"
+              color="primary"
+              size="large"
+              rounded="pill"
+              prepend-icon="mdi-plus"
+              elevation="2"
+              @click="openCreateDialog"
             >
-              <button
-                v-if="canOpenClassroom(classroom.class_status)"
-                class="btn btn-open"
-                :disabled="updatingClassroomId === classroom.id"
-                @click="updateClassroomStatus(classroom.id, 'OPEN')"
-              >
-                {{ updatingClassroomId === classroom.id ? 'Updating...' : 'Open' }}
-              </button>
+              Create Classroom
+            </v-btn>
 
-              <button
-                v-if="canCloseClassroom(classroom.class_status)"
-                class="btn btn-close"
-                :disabled="updatingClassroomId === classroom.id"
-                @click="updateClassroomStatus(classroom.id, 'CLOSED')"
-              >
-                {{ updatingClassroomId === classroom.id ? 'Updating...' : 'Close' }}
-              </button>
-
-              <button
-                v-if="canArchiveClassroom(classroom.class_status)"
-                class="btn btn-archive"
-                :disabled="updatingClassroomId === classroom.id"
-                @click="updateClassroomStatus(classroom.id, 'ARCHIVED')"
-              >
-                {{ updatingClassroomId === classroom.id ? 'Updating...' : 'Archive' }}
-              </button>
-            </div>
-          </article>
+            <v-btn
+              color="grey-darken-4"
+              variant="flat"
+              size="large"
+              rounded="pill"
+              prepend-icon="mdi-logout"
+              @click="logout"
+            >
+              Logout
+            </v-btn>
+          </div>
         </div>
-      </article>
-    </section>
-  </div>
+      </v-card-text>
+    </v-card>
+
+    <v-row align="stretch" dense>
+      <v-col cols="12" lg="8">
+        <v-card rounded="xl" elevation="4" class="h-100 section-card">
+          <v-card-text class="pa-5">
+            <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-5">
+              <div>
+                <div class="text-h5 font-weight-bold">My Classrooms</div>
+                <div class="text-medium-emphasis">
+                  Browse active classes and archived records.
+                </div>
+              </div>
+
+              <v-chip
+                color="primary"
+                variant="tonal"
+                rounded="pill"
+                class="font-weight-bold"
+              >
+                {{
+                  activeTab === 'active'
+                    ? filteredActiveClassrooms.length
+                    : filteredArchivedClassrooms.length
+                }}
+              </v-chip>
+            </div>
+
+            <v-text-field
+              v-model="search"
+              prepend-inner-icon="mdi-magnify"
+              label="Search classrooms"
+              variant="outlined"
+              rounded="xl"
+              density="comfortable"
+              hide-details
+              class="mb-4"
+            />
+
+            <v-tabs
+              v-model="activeTab"
+              color="primary"
+              align-tabs="center"
+              class="mb-4"
+            >
+              <v-tab value="active">
+                Active Classrooms
+                <v-chip size="x-small" class="ml-2" variant="tonal">
+                  {{ activeClassrooms.length }}
+                </v-chip>
+              </v-tab>
+
+              <v-tab value="archived">
+                Archived Classrooms
+                <v-chip size="x-small" class="ml-2" variant="tonal">
+                  {{ archivedClassrooms.length }}
+                </v-chip>
+              </v-tab>
+            </v-tabs>
+
+            <v-window v-model="activeTab">
+              <v-window-item value="active">
+                <div v-if="classroomsPending" class="py-10 text-center">
+                  <v-progress-circular indeterminate color="primary" />
+                  <div class="mt-3 text-medium-emphasis">
+                    Loading classrooms...
+                  </div>
+                </div>
+
+                <v-alert
+                  v-else-if="classroomsError"
+                  type="error"
+                  variant="tonal"
+                  rounded="xl"
+                >
+                  Failed to load classrooms.
+                </v-alert>
+
+                <div
+                  v-else
+                  :class="[
+                    'classroom-scroll-wrapper',
+                    { 'classroom-scroll-area': shouldScrollClassrooms }
+                  ]"
+                >
+                  <v-row dense class="classroom-grid-row">
+                    <v-col
+                      v-for="item in filteredActiveClassrooms"
+                      :key="item.id"
+                      cols="12"
+                      md="6"
+                    >
+                      <v-card
+                        rounded="xl"
+                        elevation="3"
+                        class="classroom-card"
+                      >
+                        <v-card-text class="classroom-card-content">
+                          <div class="d-flex align-start justify-space-between ga-3 mb-4">
+                            <div class="classroom-main">
+                              <div class="text-h6 font-weight-bold classroom-title">
+                                {{ item.title || 'Untitled Classroom' }}
+                              </div>
+                              <div class="text-primary font-weight-medium classroom-code">
+                                {{ item.code || '—' }}
+                              </div>
+                            </div>
+
+                            <v-chip
+                              :color="classroomStatusColor(item.class_status)"
+                              variant="tonal"
+                              rounded="pill"
+                              class="status-chip"
+                            >
+                              {{ classroomStatusLabel(item.class_status) }}
+                            </v-chip>
+                          </div>
+
+                          <div class="text-body-2 text-medium-emphasis classroom-description mb-4">
+                            {{ item.description || 'No description provided.' }}
+                          </div>
+
+                          <div class="classroom-meta mb-4">
+                            <div class="text-body-2">
+                              <strong>Term:</strong> {{ item.term || '—' }}
+                            </div>
+                            <div class="text-body-2">
+                              <strong>ID:</strong> {{ item.id }}
+                            </div>
+                          </div>
+
+                          <div class="classroom-card-actions">
+                            <v-btn
+                              color="primary"
+                              variant="flat"
+                              rounded="pill"
+                              prepend-icon="mdi-open-in-new"
+                              @click="goToClassroom(item.id)"
+                            >
+                              View
+                            </v-btn>
+
+                            <div
+                              v-if="isInstructor"
+                              class="d-flex flex-wrap ga-2 action-group"
+                            >
+                              <v-btn
+                                v-if="String(item.class_status || '').toUpperCase() === 'OPEN'"
+                                color="warning"
+                                variant="flat"
+                                rounded="pill"
+                                prepend-icon="mdi-lock-outline"
+                                @click="updateClassroomStatus(item.id, 'CLOSED')"
+                              >
+                                Close
+                              </v-btn>
+
+                              <v-btn
+                                v-else-if="String(item.class_status || '').toUpperCase() === 'CLOSED'"
+                                color="success"
+                                variant="flat"
+                                rounded="pill"
+                                prepend-icon="mdi-lock-open-variant-outline"
+                                @click="updateClassroomStatus(item.id, 'OPEN')"
+                              >
+                                Reopen
+                              </v-btn>
+
+                              <v-btn
+                                color="grey-darken-1"
+                                variant="flat"
+                                rounded="pill"
+                                prepend-icon="mdi-archive-outline"
+                                @click="updateClassroomStatus(item.id, 'ARCHIVED')"
+                              >
+                                Archive
+                              </v-btn>
+                            </div>
+                          </div>
+                        </v-card-text>
+                      </v-card>
+                    </v-col>
+
+                    <v-col
+                      v-if="filteredActiveClassrooms.length === 0"
+                      cols="12"
+                    >
+                      <v-sheet
+                        rounded="xl"
+                        color="surface-variant"
+                        class="pa-8 text-center"
+                      >
+                        <v-icon size="40" color="medium-emphasis">
+                          mdi-book-open-page-variant-outline
+                        </v-icon>
+                        <div class="text-h6 mt-3 mb-2">
+                          No active classrooms found
+                        </div>
+                        <div class="text-medium-emphasis">
+                          {{
+                            search
+                              ? 'Try a different search keyword.'
+                              : 'Your active classrooms will appear here.'
+                          }}
+                        </div>
+                      </v-sheet>
+                    </v-col>
+                  </v-row>
+                </div>
+              </v-window-item>
+
+              <v-window-item value="archived">
+                <div
+                  :class="[
+                    'classroom-scroll-wrapper',
+                    { 'classroom-scroll-area': shouldScrollClassrooms }
+                  ]"
+                >
+                  <v-row dense class="classroom-grid-row">
+                    <v-col
+                      v-for="item in filteredArchivedClassrooms"
+                      :key="item.id"
+                      cols="12"
+                      md="6"
+                    >
+                      <v-card
+                        rounded="xl"
+                        elevation="2"
+                        class="classroom-card archived-card"
+                      >
+                        <v-card-text class="classroom-card-content">
+                          <div class="d-flex align-start justify-space-between ga-3 mb-4">
+                            <div class="classroom-main">
+                              <div class="text-h6 font-weight-bold classroom-title">
+                                {{ item.title || 'Untitled Classroom' }}
+                              </div>
+                              <div class="text-primary font-weight-medium classroom-code">
+                                {{ item.code || '—' }}
+                              </div>
+                            </div>
+
+                            <v-chip
+                              color="grey"
+                              variant="tonal"
+                              rounded="pill"
+                              class="status-chip"
+                            >
+                              Archived
+                            </v-chip>
+                          </div>
+
+                          <div class="text-body-2 text-medium-emphasis classroom-description mb-4">
+                            {{ item.description || 'No description provided.' }}
+                          </div>
+
+                          <div class="classroom-meta mb-4">
+                            <div class="text-body-2">
+                              <strong>Term:</strong> {{ item.term || '—' }}
+                            </div>
+                            <div class="text-body-2">
+                              <strong>ID:</strong> {{ item.id }}
+                            </div>
+                          </div>
+
+                          <div class="classroom-card-actions">
+                            <v-btn
+                              color="primary"
+                              variant="tonal"
+                              rounded="pill"
+                              prepend-icon="mdi-open-in-new"
+                              @click="goToClassroom(item.id)"
+                            >
+                              View
+                            </v-btn>
+
+                            <div v-if="isInstructor" class="d-flex ga-2 action-group">
+                              <v-btn
+                                color="success"
+                                variant="flat"
+                                rounded="pill"
+                                prepend-icon="mdi-restore"
+                                @click="updateClassroomStatus(item.id, 'CLOSED')"
+                              >
+                                Restore
+                              </v-btn>
+                            </div>
+                          </div>
+                        </v-card-text>
+                      </v-card>
+                    </v-col>
+
+                    <v-col
+                      v-if="filteredArchivedClassrooms.length === 0"
+                      cols="12"
+                    >
+                      <v-sheet
+                        rounded="xl"
+                        color="surface-variant"
+                        class="pa-8 text-center"
+                      >
+                        <v-icon size="40" color="medium-emphasis">
+                          mdi-archive-outline
+                        </v-icon>
+                        <div class="text-h6 mt-3 mb-2">
+                          No archived classrooms
+                        </div>
+                        <div class="text-medium-emphasis">
+                          Archived classrooms will appear here.
+                        </div>
+                      </v-sheet>
+                    </v-col>
+                  </v-row>
+                </div>
+              </v-window-item>
+            </v-window>
+          </v-card-text>
+        </v-card>
+      </v-col>
+
+      <v-col cols="12" lg="4">
+        <v-card rounded="xl" elevation="4" class="h-100 section-card">
+          <v-card-text class="pa-5">
+            <div class="text-h5 font-weight-bold mb-1">Learning Tools</div>
+            <div class="text-medium-emphasis mb-4">
+              UI placeholders for the next modules.
+            </div>
+
+            <div class="d-flex flex-column ga-4">
+              <v-card
+                rounded="xl"
+                variant="tonal"
+                color="cyan-darken-2"
+                class="tool-card"
+              >
+                <v-card-text class="pa-5 d-flex flex-column justify-space-between h-100">
+                  <div class="d-flex align-start justify-space-between ga-3">
+                    <div class="d-flex ga-3">
+                      <v-avatar color="cyan-darken-2" size="48">
+                        <v-icon>mdi-code-tags</v-icon>
+                      </v-avatar>
+
+                      <div>
+                        <div class="text-h6 font-weight-bold">Code Lab</div>
+                        <div class="text-medium-emphasis">Coming soon</div>
+                      </div>
+                    </div>
+
+                    <v-chip size="small" variant="outlined">UI Only</v-chip>
+                  </div>
+
+                  <div class="text-medium-emphasis mt-6">
+                    Interactive coding workspace for lab exercises,
+                    submissions, and feedback.
+                  </div>
+                </v-card-text>
+              </v-card>
+
+              <v-card
+                rounded="xl"
+                variant="tonal"
+                color="indigo-darken-1"
+                class="tool-card"
+              >
+                <v-card-text class="pa-5 d-flex flex-column justify-space-between h-100">
+                  <div class="d-flex align-start justify-space-between ga-3">
+                    <div class="d-flex ga-3">
+                      <v-avatar color="indigo-darken-1" size="48">
+                        <v-icon>mdi-monitor-dashboard</v-icon>
+                      </v-avatar>
+
+                      <div>
+                        <div class="text-h6 font-weight-bold">Simulator</div>
+                        <div class="text-medium-emphasis">Coming soon</div>
+                      </div>
+                    </div>
+
+                    <v-chip size="small" variant="outlined">UI Only</v-chip>
+                  </div>
+
+                  <div class="text-medium-emphasis mt-6">
+                    Virtual simulation area for guided activities and
+                    interactive demonstrations.
+                  </div>
+                </v-card-text>
+              </v-card>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-col>
+    </v-row>
+
+    <v-dialog v-model="showCreateDialog" max-width="720">
+      <v-card rounded="xl">
+        <v-card-title class="text-h5 font-weight-bold pt-5 px-5">
+          Create Classroom
+        </v-card-title>
+
+        <v-card-text class="px-5 pt-3">
+          <v-row dense>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="createForm.title"
+                label="Title"
+                variant="outlined"
+                rounded="xl"
+              />
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="createForm.code"
+                label="Code"
+                variant="outlined"
+                rounded="xl"
+              />
+            </v-col>
+
+            <v-col cols="12">
+              <v-textarea
+                v-model="createForm.description"
+                label="Description"
+                variant="outlined"
+                rounded="xl"
+                rows="4"
+                auto-grow
+              />
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="createForm.term"
+                label="Term"
+                variant="outlined"
+                rounded="xl"
+              />
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <v-select
+                v-model="createForm.class_status"
+                label="Status"
+                variant="outlined"
+                rounded="xl"
+                :items="['OPEN', 'CLOSED']"
+              />
+            </v-col>
+          </v-row>
+        </v-card-text>
+
+        <v-card-actions class="px-5 pb-5">
+          <v-spacer />
+          <v-btn
+            variant="text"
+            rounded="pill"
+            :disabled="isSubmitting"
+            @click="closeCreateDialog"
+          >
+            Cancel
+          </v-btn>
+
+          <v-btn
+            color="primary"
+            rounded="pill"
+            :loading="isSubmitting"
+            @click="createClassroom"
+          >
+            Save Classroom
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+  </v-container>
 </template>
 
 <style scoped>
-.dashboard-page {
+.dashboard {
   min-height: 100vh;
-  padding: 32px 24px 48px;
-  background: #f6f8fb;
-  color: #1f2937;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.06), transparent 30%),
+    radial-gradient(circle at bottom left, rgba(99, 102, 241, 0.05), transparent 30%),
+    #f5f7fb;
 }
 
-.hero {
+.hero-card {
+  overflow: hidden;
+  border: 1px solid rgba(37, 99, 235, 0.08);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.95));
+}
+
+.hero-left {
+  min-width: 0;
+}
+
+.logo-shell {
+  width: 300px;
+  height: 120px;
+  flex-shrink: 0;
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
   display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  align-items: flex-start;
-  margin-bottom: 24px;
-  padding: 28px;
-  border-radius: 20px;
-  background: linear-gradient(135deg, #ffffff, #eef4ff);
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #6366f1;
-}
-
-.hero h1 {
-  margin: 0;
-  font-size: 36px;
-  line-height: 1.1;
-}
-
-.subtitle {
-  margin: 8px 0 0;
-  color: #4b5563;
-  font-size: 16px;
+.hero-logo-img {
+  width: 100%;
+  height: 100%;
 }
 
 .hero-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.clickable {
-  cursor: pointer;
-}
-
-.btn {
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: transform 0.15s ease, opacity 0.15s ease;
-}
-
-.btn:hover {
-  transform: translateY(-1px);
-}
-
-.btn:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.btn-primary {
-  background: #4f46e5;
-  color: #ffffff;
-}
-
-.btn-secondary {
-  background: #111827;
-  color: #ffffff;
-}
-
-.btn-danger {
-  background: #dc2626;
-  color: #ffffff;
-}
-
-.btn-light {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.btn-open {
-  background: #15803d;
-  color: #ffffff;
-}
-
-.btn-close {
-  background: #d97706;
-  color: #ffffff;
-}
-
-.btn-archive {
-  background: #6b7280;
-  color: #ffffff;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.stat-card {
-  padding: 20px;
-  border-radius: 18px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
-}
-
-.stat-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 700;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 10px;
-}
-
-.stat-value {
-  display: block;
-  font-size: 18px;
-  line-height: 1.35;
-  word-break: break-word;
-}
-
-.content-grid {
-  display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 20px;
-}
-
-.panel {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 20px;
-  padding: 22px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
-}
-
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 18px;
-}
-
-.panel-header h2 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.classes-header-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.panel-count {
-  min-width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #eef2ff;
-  color: #4338ca;
-  font-weight: 700;
-}
-
-.tabs-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
-}
-
-.tab-btn {
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #374151;
-  border-radius: 999px;
-  padding: 10px 14px;
-  font-weight: 700;
-  cursor: pointer;
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.tab-btn.active {
-  background: #111827;
-  color: #ffffff;
-  border-color: #111827;
-}
-
-.tab-count {
-  display: inline-flex;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.create-classroom-box {
-  border: 1px solid #e5e7eb;
-  background: #fafcff;
-  border-radius: 18px;
-  padding: 18px;
-  margin-bottom: 18px;
-}
-
-.create-classroom-box h3 {
-  margin: 0 0 16px;
-  font-size: 20px;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.form-group.full {
-  grid-column: 1 / -1;
-}
-
-.form-group label {
-  font-size: 14px;
-  font-weight: 700;
-  color: #374151;
-}
-
-.form-group input,
-.form-group select,
-.form-group textarea {
-  width: 100%;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  padding: 12px 14px;
-  font: inherit;
-  background: #fff;
-  color: #111827;
-}
-
-.form-message {
-  margin: 16px 0 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  font-weight: 600;
-}
-
-.form-error {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-}
-
-.form-success {
-  background: #ecfdf5;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
-}
-
-.status-pill {
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.status-active {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.status-inactive {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-.profile-main {
-  display: flex;
-  gap: 14px;
-  align-items: center;
-  margin-bottom: 22px;
-}
-
-.profile-main h3 {
-  margin: 0 0 6px;
-  font-size: 22px;
-}
-
-.profile-main p {
-  margin: 2px 0;
-  color: #4b5563;
-}
-
-.avatar-fallback {
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  background: #4f46e5;
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  font-weight: 700;
   flex-shrink: 0;
 }
 
-.info-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+.section-card {
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.info-item {
-  border: 1px solid #eef2f7;
-  background: #f9fbff;
-  border-radius: 14px;
-  padding: 14px;
+.classroom-scroll-wrapper {
+  overflow: visible;
 }
 
-.info-label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: #6b7280;
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+.classroom-scroll-area {
+  max-height: 430px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 10px 2px 2px;
 }
 
-.classroom-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+.classroom-scroll-area::-webkit-scrollbar {
+  width: 8px;
+}
+
+.classroom-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 999px;
+}
+
+.classroom-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.classroom-grid-row {
+  margin: 0 !important;
+  padding: 2px 4px 10px 2px;
 }
 
 .classroom-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 18px;
-  background: #fcfdff;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  height: 100%;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
 }
 
 .classroom-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  border-color: rgba(37, 99, 235, 0.16);
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.12);
 }
 
-.classroom-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-  margin-bottom: 12px;
-}
-
-.classroom-top h3 {
-  margin: 0;
-  font-size: 20px;
-}
-
-.class-code {
-  margin: 6px 0 0;
-  color: #6366f1;
-  font-weight: 700;
-  font-size: 14px;
-}
-
-.class-description {
-  margin: 0 0 14px;
-  color: #4b5563;
-  line-height: 1.55;
-  min-height: 48px;
-}
-
-.class-meta {
+.classroom-card-content {
+  min-height: 260px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  color: #374151;
-  font-size: 14px;
+  padding: 18px !important;
 }
 
-.classroom-actions {
+.classroom-main {
+  min-width: 0;
+}
+
+.classroom-title {
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.classroom-code {
+  margin-top: 4px;
+}
+
+.classroom-description {
+  min-height: 44px;
+  line-height: 1.55;
+}
+
+.classroom-meta {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.classroom-card-actions {
+  margin-top: auto;
+  padding-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-top: 14px;
 }
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-  background: #e5e7eb;
-  color: #374151;
+.action-group {
+  justify-content: flex-end;
 }
 
-.badge-open {
-  background: #dcfce7;
-  color: #166534;
+.status-chip {
+  flex-shrink: 0;
 }
 
-.badge-closed {
-  background: #fef3c7;
-  color: #92400e;
+.archived-card {
+  opacity: 0.96;
 }
 
-.badge-archived {
-  background: #e5e7eb;
-  color: #374151;
+.tool-card {
+  min-height: 180px;
+  border: 1px solid rgba(15, 23, 42, 0.05);
 }
 
-.empty-state {
-  padding: 22px;
-  border: 1px dashed #d1d5db;
-  border-radius: 16px;
-  text-align: center;
-  color: #6b7280;
-  background: #fafafa;
-}
-
-.error-state {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-@media (max-width: 1100px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+@media (max-width: 1264px) {
+  .classroom-scroll-area {
+    max-height: none;
+    overflow: visible;
+    padding: 0;
   }
 
-  .content-grid {
-    grid-template-columns: 1fr;
+  .classroom-grid-row {
+    padding: 0;
   }
 }
 
-@media (max-width: 700px) {
-  .dashboard-page {
-    padding: 20px 14px 32px;
+@media (max-width: 960px) {
+  .tool-card {
+    min-height: auto;
   }
 
-  .hero {
+  .classroom-card-content {
+    min-height: unset;
+  }
+
+  .classroom-card-actions {
     flex-direction: column;
-    padding: 20px;
+    align-items: stretch;
   }
 
-  .hero h1 {
-    font-size: 30px;
-  }
-
-  .stats-grid,
-  .info-grid,
-  .classroom-grid,
-  .form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .classroom-top,
-  .panel-header,
-  .classes-header-actions {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .form-actions .btn,
-  .classes-header-actions .btn,
-  .classroom-actions .btn {
+  .classroom-card-actions :deep(.v-btn) {
     width: 100%;
+  }
+
+  .action-group {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .action-group :deep(.v-btn) {
+    flex: 1 1 100%;
+  }
+
+  .hero-actions {
+    width: 100%;
+  }
+
+  .hero-actions :deep(.v-btn) {
+    flex: 1 1 100%;
   }
 }
 </style>

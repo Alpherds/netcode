@@ -11,8 +11,14 @@
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.89.1",
+    "@mdi/font": "^7.4.47",
     "nuxt": "^4.4.2",
     "vue": "^3.5.32",
-    "vue-router": "^5.0.4"
+    "vue-router": "^5.0.4",
+    "vuetify": "^4.0.5",
+    "vuetify-nuxt-module": "^0.19.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0"
   }
 }
