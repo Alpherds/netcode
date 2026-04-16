@@ -19,28 +19,24 @@ const currentStep = ref(0)
 
 const steps: StepItem[] = [
   {
-    title: 'Ready',
-    description: 'Initial layout of cable, plug, and crimping tool.',
+    title: 'Strip the Cable Jacket',
+    description: 'Remove about 1 inch of the outer jacket and expose the inner wires.',
   },
   {
-    title: 'Prepare cable',
-    description: 'Move the Ethernet cable into working position.',
+    title: 'Untwist and Organize',
+    description: 'Arrange the wires in T568B order: white-orange, orange, white-green, blue, white-blue, green, white-brown, brown.',
   },
   {
-    title: 'Align plug',
-    description: 'Bring the RJ45 plug into alignment.',
+    title: 'Trim the Wires',
+    description: 'Flatten the arranged wires and trim them to about 1/2 inch from the jacket edge.',
   },
   {
-    title: 'Insert cable',
-    description: 'Simulate cable insertion into the RJ45 connector.',
+    title: 'Insert into Connector',
+    description: 'Insert the wires into the RJ45 plug with the gold pins facing up and the clip on the bottom.',
   },
   {
-    title: 'Crimp connector',
-    description: 'Move the crimping tool into place and simulate the press.',
-  },
-  {
-    title: 'Finished cable',
-    description: 'Show the final presentation pose of the assembled cable.',
+    title: 'Crimp the Connector',
+    description: 'Insert the connector into the crimping tool and squeeze securely to lock the pins onto the wires.',
   },
 ]
 
@@ -63,7 +59,7 @@ async function nextStep() {
   if (currentStep.value >= steps.length - 1) return
 
   currentStep.value += 1
-  await sceneRef.value.playStep(currentStep.value)
+  await sceneRef.value.playStep(currentStep.value + 1)
 }
 
 async function playAll() {
@@ -73,11 +69,11 @@ async function playAll() {
   await resetDemo()
   isPlaying.value = true
 
-  for (let step = 1; step < steps.length; step++) {
+  for (let index = 0; index < steps.length; index++) {
     if (!isPlaying.value) break
-    currentStep.value = step
-    await sceneRef.value.playStep(step)
-    await delay(400)
+    currentStep.value = index
+    await sceneRef.value.playStep(index + 1)
+    await delay(500)
   }
 
   isPlaying.value = false
@@ -98,9 +94,7 @@ onMounted(async () => {
   <v-container fluid class="py-6">
     <v-row>
       <v-col cols="12" lg="8">
-        <ClientOnly>
-          <Rj45DemoScene ref="sceneRef" />
-        </ClientOnly>
+        <Rj45DemoScene ref="sceneRef" />
       </v-col>
 
       <v-col cols="12" lg="4">
