@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch, useRoute } from '#imports'
 import DailyMeetingEmbed from '~/components/DailyMeetingEmbed.vue'
 import SessionReadinessPanel from '~/components/SessionReadinessPanel.vue'
@@ -90,7 +90,7 @@ const attendanceLoading = ref(false)
 const attendanceError = ref('')
 
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
-let isPollingAttendance = false
+let isPolling = false
 
 const roleLabel = computed(() =>
   String(profile.value?.role_label || '').toUpperCase()
@@ -286,7 +286,9 @@ const enterMeeting = async () => {
   isPreparingMeeting.value = true
 
   try {
-    const payload = await $fetch<DailyJoinInfo>(`/api/sessions/${sessionId}/daily-join`)
+    const payload = await $fetch<DailyJoinInfo>(
+      `/api/sessions/${sessionId}/daily-join`
+    )
     joinInfo.value = payload
     showMeeting.value = true
   } catch (error: any) {
@@ -353,16 +355,20 @@ const startAutoRefresh = () => {
   if (autoRefreshTimer) return
 
   autoRefreshTimer = setInterval(async () => {
-    if (isPollingAttendance) return
+    if (document.hidden || isPolling) return
 
-    isPollingAttendance = true
+    isPolling = true
 
     try {
-      await refreshAttendance()
+      if (showMeeting.value) {
+        await refreshAttendance()
+      } else {
+        await Promise.allSettled([refreshSession(), refreshAttendance()])
+      }
     } finally {
-      isPollingAttendance = false
+      isPolling = false
     }
-  }, 10000)
+  }, 15000)
 }
 
 const stopAutoRefresh = () => {
@@ -372,17 +378,9 @@ const stopAutoRefresh = () => {
   }
 }
 
-watch(
-  () => session.value?.meeting_status,
-  (status) => {
-    if (status === 'LIVE') {
-      startAutoRefresh()
-    } else {
-      stopAutoRefresh()
-    }
-  },
-  { immediate: true }
-)
+onMounted(() => {
+  startAutoRefresh()
+})
 
 onBeforeUnmount(() => {
   stopAutoRefresh()
@@ -399,546 +397,455 @@ const sessionErrorMessage = computed(() => {
 
   return 'Failed to load session.'
 })
+
+const sessionStatusColor = computed(() => {
+  switch (String(session.value?.meeting_status || '').toUpperCase()) {
+    case 'LIVE':
+      return 'success'
+    case 'SCHEDULED':
+      return 'info'
+    case 'ENDED':
+      return 'grey'
+    case 'CANCELLED':
+      return 'error'
+    default:
+      return 'grey'
+  }
+})
 </script>
 
 <template>
-  <div class="page">
-    <header class="hero">
-      <div>
-        <button class="back-btn" @click="goBack">← Back</button>
-        <h1>{{ session?.title || 'Session Room' }}</h1>
-        <p class="subtitle">{{ classroomLabel }}</p>
-      </div>
-
-      <div class="hero-actions">
-        <button
-          v-if="canStart"
-          class="btn btn-success"
-          :disabled="isUpdatingStatus"
-          @click="startSession"
-        >
-          {{ isUpdatingStatus ? 'Updating...' : 'Start Session' }}
-        </button>
-
-        <button
-          v-if="canEnd"
-          class="btn btn-danger"
-          :disabled="isUpdatingStatus"
-          @click="endSession"
-        >
-          {{ isUpdatingStatus ? 'Updating...' : 'End Session' }}
-        </button>
-
-        <button class="btn" @click="refreshSession">Refresh</button>
-      </div>
-    </header>
-
-    <section v-if="pending" class="panel">
+  <v-container fluid class="session-page pa-4 pa-md-6">
+    <v-alert
+      v-if="pending"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+    >
       Loading session...
-    </section>
+    </v-alert>
 
-    <section v-else-if="error" class="panel error">
+    <v-alert
+      v-else-if="error"
+      type="error"
+      variant="tonal"
+      class="mb-4"
+    >
       {{ sessionErrorMessage }}
-    </section>
+    </v-alert>
 
     <template v-else>
-      <section class="panel summary-panel">
-        <div class="summary-grid">
-          <div class="summary-item">
-            <span class="summary-label">Room</span>
-            <strong>{{ session?.room_name || '—' }}</strong>
+      <v-card rounded="xl" elevation="4" class="hero-card mb-6">
+        <v-card-text class="pa-5 pa-md-7">
+          <div class="d-flex justify-space-between align-start flex-wrap ga-4 mb-5">
+            <v-btn
+              variant="text"
+              color="primary"
+              rounded="pill"
+              prepend-icon="mdi-arrow-left"
+              class="back-button"
+              @click="goBack"
+            >
+              Back to Classroom
+            </v-btn>
+
+            <div class="d-flex flex-wrap ga-3 align-center">
+              <v-chip
+                :color="sessionStatusColor"
+                variant="tonal"
+                rounded="pill"
+                size="large"
+              >
+                {{ session?.meeting_status || 'UNKNOWN' }}
+              </v-chip>
+
+              <v-btn
+                v-if="canStart"
+                color="success"
+                rounded="pill"
+                size="large"
+                prepend-icon="mdi-play-circle-outline"
+                :loading="isUpdatingStatus"
+                @click="startSession"
+              >
+                Start Session
+              </v-btn>
+
+              <v-btn
+                v-if="canEnd"
+                color="error"
+                rounded="pill"
+                size="large"
+                prepend-icon="mdi-stop-circle-outline"
+                :loading="isUpdatingStatus"
+                @click="endSession"
+              >
+                End Session
+              </v-btn>
+            </div>
           </div>
 
-          <div class="summary-item">
-            <span class="summary-label">Status</span>
-            <strong>{{ session?.meeting_status || '—' }}</strong>
+          <div class="text-overline text-primary font-weight-bold mb-2">
+            Session Space
           </div>
 
-          <div class="summary-item">
-            <span class="summary-label">Start</span>
-            <strong>{{ formatDateTime(session?.starts_at) }}</strong>
+          <div class="text-h4 font-weight-bold mb-3">
+            {{ session?.title || 'Session Room' }}
           </div>
 
-          <div class="summary-item">
-            <span class="summary-label">End</span>
-            <strong>{{ formatDateTime(session?.ends_at) }}</strong>
+          <div class="d-flex flex-wrap ga-2 mb-4">
+            <v-chip color="primary" variant="outlined" rounded="pill">
+              {{ session?.room_name || 'No room name' }}
+            </v-chip>
+            <v-chip color="grey-darken-1" variant="outlined" rounded="pill">
+              {{ classroomLabel }}
+            </v-chip>
           </div>
 
-          <div class="summary-item">
-            <span class="summary-label">Provider</span>
-            <strong>{{ session?.meeting_provider || '—' }}</strong>
+          <p class="text-body-1 text-medium-emphasis mb-0">
+            {{ session?.notes || 'No notes provided.' }}
+          </p>
+        </v-card-text>
+      </v-card>
+
+      <v-alert
+        v-if="statusMessage"
+        type="success"
+        variant="tonal"
+        class="mb-4"
+      >
+        {{ statusMessage }}
+      </v-alert>
+
+      <v-alert
+        v-if="statusError"
+        type="error"
+        variant="tonal"
+        class="mb-4"
+      >
+        {{ statusError }}
+      </v-alert>
+
+      <v-row dense class="mb-6">
+        <v-col cols="12" md="4">
+          <v-sheet rounded="xl" color="surface" class="summary-tile pa-4">
+            <div class="text-caption text-medium-emphasis mb-2">Room</div>
+            <div class="font-weight-bold">{{ session?.room_name || '—' }}</div>
+          </v-sheet>
+        </v-col>
+
+        <v-col cols="12" md="4">
+          <v-sheet rounded="xl" color="surface" class="summary-tile pa-4">
+            <div class="text-caption text-medium-emphasis mb-2">Start</div>
+            <div class="font-weight-bold">{{ formatDateTime(session?.starts_at) }}</div>
+          </v-sheet>
+        </v-col>
+
+        <v-col cols="12" md="4">
+          <v-sheet rounded="xl" color="surface" class="summary-tile pa-4">
+            <div class="text-caption text-medium-emphasis mb-2">End</div>
+            <div class="font-weight-bold">{{ formatDateTime(session?.ends_at) }}</div>
+          </v-sheet>
+        </v-col>
+      </v-row>
+
+      <v-card rounded="xl" elevation="3" class="section-card mb-6">
+        <v-card-text class="pa-5">
+          <div class="d-flex justify-space-between align-start flex-wrap ga-3 mb-4">
+            <div>
+              <div class="text-h5 font-weight-bold">Live Meeting</div>
+              <div class="text-body-2 text-medium-emphasis">
+                Join the room once the session becomes live.
+              </div>
+            </div>
+
+            <v-chip color="primary" variant="tonal" rounded="pill">
+              {{ session?.room_name || 'No room name' }}
+            </v-chip>
           </div>
 
-          <div class="summary-item">
-            <span class="summary-label">Notes</span>
-            <strong>{{ session?.notes || 'No notes provided.' }}</strong>
-          </div>
-        </div>
-
-        <p v-if="statusMessage" class="status-message success">
-          {{ statusMessage }}
-        </p>
-
-        <p v-if="statusError" class="status-message error-message">
-          {{ statusError }}
-        </p>
-      </section>
-
-      <section class="panel meeting-panel">
-        <div class="panel-header">
-          <h2>Live Meeting</h2>
-          <span class="room-chip">
-            {{ session?.room_name || 'No room name' }}
-          </span>
-        </div>
-
-        <div
-          v-if="isScheduled || isCancelled || isEnded"
-          class="meeting-state-card"
-          :class="{
-            danger: isCancelled,
-            neutral: isEnded,
-          }"
-        >
-          <h3>{{ accessTitle }}</h3>
-          <p>{{ accessMessage }}</p>
-        </div>
-
-        <div v-else-if="isLive && !showMeeting" class="meeting-entry-card">
-          <div>
-            <h3>{{ accessTitle }}</h3>
-            <p>{{ accessMessage }}</p>
-          </div>
-
-          <button
-            v-if="canEnterMeeting"
-            class="btn btn-primary"
-            :disabled="isPreparingMeeting"
-            @click="enterMeeting"
+          <v-alert
+            v-if="!session?.room_name"
+            type="error"
+            variant="tonal"
+            class="mb-4"
           >
-            {{ isPreparingMeeting ? 'Preparing room...' : 'Enter Meeting' }}
-          </button>
-        </div>
+            This session has no room name yet.
+          </v-alert>
 
-        <ClientOnly v-else-if="isLive && showMeeting">
-          <DailyMeetingEmbed
-            v-if="joinInfo"
-            :room-url="joinInfo.roomUrl"
-            :token="joinInfo.token"
-            @joined="onMeetingJoined"
-            @closed="onMeetingClosed"
-          />
+          <v-alert
+            v-if="isScheduled"
+            type="info"
+            variant="tonal"
+          >
+            <strong>{{ accessTitle }}</strong><br />
+            {{ accessMessage }}
+          </v-alert>
 
-          <template #fallback>
-            <div class="panel">Loading meeting...</div>
-          </template>
-        </ClientOnly>
+          <v-alert
+            v-else-if="isCancelled"
+            type="error"
+            variant="tonal"
+          >
+            <strong>{{ accessTitle }}</strong><br />
+            {{ accessMessage }}
+          </v-alert>
 
-        <div v-if="!session?.room_name" class="panel error">
-          This session has no room name yet.
-        </div>
-      </section>
+          <v-alert
+            v-else-if="isEnded"
+            type="warning"
+            variant="tonal"
+          >
+            <strong>{{ accessTitle }}</strong><br />
+            {{ accessMessage }}
+          </v-alert>
+
+          <v-sheet
+            v-else-if="isLive && !showMeeting"
+            rounded="xl"
+            class="meeting-entry-sheet pa-5"
+          >
+            <div>
+              <div class="text-h6 font-weight-bold mb-2">{{ accessTitle }}</div>
+              <div class="text-body-2 text-medium-emphasis">
+                {{ accessMessage }}
+              </div>
+            </div>
+
+            <v-btn
+              v-if="canEnterMeeting"
+              color="primary"
+              rounded="pill"
+              size="large"
+              prepend-icon="mdi-video-outline"
+              :loading="isPreparingMeeting"
+              @click="enterMeeting"
+            >
+              Enter Meeting
+            </v-btn>
+          </v-sheet>
+
+          <ClientOnly v-else-if="isLive && showMeeting">
+            <DailyMeetingEmbed
+              v-if="joinInfo"
+              :room-url="joinInfo.roomUrl"
+              :token="joinInfo.token"
+              @joined="onMeetingJoined"
+              @closed="onMeetingClosed"
+            />
+
+            <template #fallback>
+              <v-sheet rounded="xl" class="pa-6 text-center">
+                Loading meeting...
+              </v-sheet>
+            </template>
+          </ClientOnly>
+        </v-card-text>
+      </v-card>
 
       <SessionReadinessPanel
-  v-if="isInstructor"
-  :session-id="sessionId"
-  :is-live="isLive"
-/>
+        v-if="isInstructor"
+        :session-id="sessionId"
+        :is-live="isLive"
+      />
 
-      <section class="panel attendance-panel">
-        <div class="panel-header attendance-header">
-          <div>
-            <h2>Attendance</h2>
-            <p class="attendance-subtitle">
-              {{
-                isInstructor
-                  ? 'Live attendance updates every 10 seconds while the session is active.'
-                  : 'Your attendance is recorded automatically when you join and leave the session.'
-              }}
-            </p>
-          </div>
-
-          <div v-if="isInstructor" class="attendance-chips">
-            <span class="room-chip">Total {{ attendanceCount }}</span>
-            <span class="attendance-chip present-chip">Present {{ presentCount }}</span>
-            <span class="attendance-chip left-chip">Left {{ leftCount }}</span>
-          </div>
-        </div>
-
-        <div v-if="attendanceLoading" class="attendance-empty">
-          Loading attendance...
-        </div>
-
-        <div v-else-if="attendanceError" class="attendance-empty error-lite">
-          {{ attendanceError }}
-        </div>
-
-        <div v-else-if="!attendance.length" class="attendance-empty">
-          No attendance records yet.
-        </div>
-
-        <div v-else-if="isInstructor" class="attendance-list">
-          <div v-for="item in attendance" :key="item.id" class="attendance-row">
+      <v-card rounded="xl" elevation="3" class="section-card">
+        <v-card-text class="pa-5">
+          <div class="d-flex justify-space-between align-start flex-wrap ga-3 mb-4">
             <div>
-              <strong>{{ item.student?.display_name || 'Unknown student' }}</strong>
-              <p>{{ item.student?.student_no || 'No student number' }}</p>
+              <div class="text-h5 font-weight-bold">Attendance</div>
+              <div class="text-body-2 text-medium-emphasis">
+                {{
+                  isInstructor
+                    ? 'Attendance updates automatically while the session is active.'
+                    : 'Your attendance is recorded automatically when you join and leave.'
+                }}
+              </div>
             </div>
 
-            <div>
-              <span class="attendance-label">Joined</span>
-              <strong>{{ formatDateTime(item.join_time) }}</strong>
-            </div>
-
-            <div>
-              <span class="attendance-label">Left</span>
-              <strong>{{ formatDateTime(item.leave_time) }}</strong>
-            </div>
-
-            <div>
-              <span class="attendance-label">Status</span>
-              <strong>{{ item.attendance_status || '—' }}</strong>
+            <div v-if="isInstructor" class="d-flex flex-wrap ga-2">
+              <v-chip color="primary" variant="tonal" rounded="pill">
+                Total {{ attendanceCount }}
+              </v-chip>
+              <v-chip color="success" variant="tonal" rounded="pill">
+                Present {{ presentCount }}
+              </v-chip>
+              <v-chip color="warning" variant="tonal" rounded="pill">
+                Left {{ leftCount }}
+              </v-chip>
             </div>
           </div>
-        </div>
 
-        <div v-else-if="studentAttendance" class="student-attendance-card">
-          <div class="student-attendance-item">
-            <span class="attendance-label">Joined</span>
-            <strong>{{ formatDateTime(studentAttendance.join_time) }}</strong>
-          </div>
+          <v-alert
+            v-if="attendanceLoading"
+            type="info"
+            variant="tonal"
+          >
+            Loading attendance...
+          </v-alert>
 
-          <div class="student-attendance-item">
-            <span class="attendance-label">Left</span>
-            <strong>{{ formatDateTime(studentAttendance.leave_time) }}</strong>
-          </div>
+          <v-alert
+            v-else-if="attendanceError"
+            type="error"
+            variant="tonal"
+          >
+            {{ attendanceError }}
+          </v-alert>
 
-          <div class="student-attendance-item">
-            <span class="attendance-label">Status</span>
-            <strong>{{ studentAttendance.attendance_status || '—' }}</strong>
-          </div>
-        </div>
+          <v-alert
+            v-else-if="!attendance.length"
+            type="info"
+            variant="tonal"
+          >
+            No attendance records yet.
+          </v-alert>
 
-        <div v-else class="attendance-empty">
-          Your attendance record will appear here after you join the session.
-        </div>
-      </section>
+          <v-row v-else-if="isInstructor" dense>
+            <v-col
+              v-for="item in attendance"
+              :key="item.id"
+              cols="12"
+            >
+              <v-card rounded="xl" elevation="1" class="attendance-card">
+                <v-card-text class="pa-4">
+                  <div class="d-flex flex-column flex-lg-row justify-space-between ga-4">
+                    <div class="attendance-student">
+                      <div class="text-subtitle-1 font-weight-bold">
+                        {{ item.student?.display_name || 'Unknown student' }}
+                      </div>
+                      <div class="text-body-2 text-medium-emphasis">
+                        {{ item.student?.student_no || 'No student number' }}
+                      </div>
+                    </div>
+
+                    <div class="attendance-meta-grid">
+                      <div>
+                        <div class="text-caption text-medium-emphasis">Joined</div>
+                        <div class="font-weight-medium">
+                          {{ formatDateTime(item.join_time) }}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div class="text-caption text-medium-emphasis">Left</div>
+                        <div class="font-weight-medium">
+                          {{ formatDateTime(item.leave_time) }}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div class="text-caption text-medium-emphasis">Status</div>
+                        <div class="font-weight-medium">
+                          {{ item.attendance_status || '—' }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+
+          <v-row v-else-if="studentAttendance" dense>
+            <v-col cols="12" md="4">
+              <v-sheet rounded="xl" color="surface-variant" class="pa-4">
+                <div class="text-caption text-medium-emphasis mb-2">Joined</div>
+                <div class="font-weight-bold">
+                  {{ formatDateTime(studentAttendance.join_time) }}
+                </div>
+              </v-sheet>
+            </v-col>
+
+            <v-col cols="12" md="4">
+              <v-sheet rounded="xl" color="surface-variant" class="pa-4">
+                <div class="text-caption text-medium-emphasis mb-2">Left</div>
+                <div class="font-weight-bold">
+                  {{ formatDateTime(studentAttendance.leave_time) }}
+                </div>
+              </v-sheet>
+            </v-col>
+
+            <v-col cols="12" md="4">
+              <v-sheet rounded="xl" color="surface-variant" class="pa-4">
+                <div class="text-caption text-medium-emphasis mb-2">Status</div>
+                <div class="font-weight-bold">
+                  {{ studentAttendance.attendance_status || '—' }}
+                </div>
+              </v-sheet>
+            </v-col>
+          </v-row>
+
+          <v-alert
+            v-else
+            type="info"
+            variant="tonal"
+          >
+            Your attendance record will appear here after you join the session.
+          </v-alert>
+        </v-card-text>
+      </v-card>
     </template>
-  </div>
+  </v-container>
 </template>
 
 <style scoped>
-.page {
+.session-page {
   min-height: 100vh;
-  padding: 32px 24px 48px;
-  background: #f6f8fb;
-  color: #1f2937;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.06), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(99, 102, 241, 0.05), transparent 32%),
+    #f5f7fb;
 }
 
-.hero {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 24px;
+.hero-card {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.92));
+  border: 1px solid rgba(37, 99, 235, 0.08);
 }
 
-.hero h1 {
-  margin: 10px 0 6px;
-  font-size: 34px;
+.section-card {
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.subtitle {
-  margin: 0;
-  color: #6b7280;
+.back-button {
+  padding-inline: 0;
 }
 
-.hero-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+.summary-tile {
+  border: 1px solid rgba(15, 23, 42, 0.05);
 }
 
-.back-btn {
-  border: 0;
-  background: transparent;
-  color: #4f46e5;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 0;
-}
-
-.btn {
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 16px;
-  background: #111827;
-  color: white;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-success {
-  background: #15803d;
-  color: white;
-}
-
-.btn-danger {
-  background: #dc2626;
-  color: white;
-}
-
-.panel {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 20px;
-  padding: 22px;
-  margin-bottom: 20px;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.summary-item {
-  border: 1px solid #eef2f7;
-  background: #f9fbff;
-  border-radius: 14px;
-  padding: 14px;
-}
-
-.summary-label,
-.attendance-label {
-  display: block;
-  margin-bottom: 8px;
-  font-size: 12px;
-  color: #6b7280;
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
-
-.status-message {
-  margin-top: 16px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  font-weight: 600;
-}
-
-.success {
-  background: #ecfdf5;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-}
-
-.error-message {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-}
-
-.meeting-panel {
-  margin-top: 12px;
-  padding: 18px;
-}
-
-.meeting-panel :deep(iframe) {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.panel-header {
+.meeting-entry-sheet {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.panel-header h2 {
-  margin: 0;
-}
-
-.room-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  background: #eef2ff;
-  color: #4338ca;
-  white-space: nowrap;
-}
-
-.meeting-state-card,
-.meeting-entry-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 22px;
+  gap: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
 }
 
-.meeting-state-card h3,
-.meeting-entry-card h3 {
-  margin: 0 0 8px;
-  font-size: 22px;
+.attendance-card {
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
 }
 
-.meeting-state-card p,
-.meeting-entry-card p {
-  margin: 0;
-  color: #6b7280;
-}
-
-.meeting-entry-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-}
-
-.meeting-state-card.danger {
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-.meeting-state-card.neutral {
-  border-color: #e5e7eb;
-  background: #f9fafb;
-}
-
-.attendance-panel {
-  padding: 18px;
-}
-
-.attendance-header {
-  align-items: flex-start;
-}
-
-.attendance-subtitle {
-  margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.attendance-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.attendance-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.present-chip {
-  background: #ecfdf5;
-  color: #166534;
-}
-
-.left-chip {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.attendance-empty {
-  border: 1px dashed #d1d5db;
-  border-radius: 16px;
-  padding: 24px;
-  text-align: center;
-  color: #6b7280;
-}
-
-.error-lite {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-.attendance-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.attendance-row {
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
-  gap: 16px;
-  border: 1px solid #eef2f7;
-  background: #f9fbff;
-  border-radius: 16px;
-  padding: 16px;
-}
-
-.attendance-row p {
-  margin: 6px 0 0;
-  color: #6b7280;
-}
-
-.student-attendance-card {
+.attendance-meta-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
+  min-width: 420px;
 }
 
-.student-attendance-item {
-  border: 1px solid #eef2f7;
-  background: #f9fbff;
-  border-radius: 16px;
-  padding: 16px;
-}
-
-.error {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-@media (max-width: 900px) {
-  .page {
-    padding: 20px 14px 32px;
-  }
-
-  .hero {
-    flex-direction: column;
-  }
-
-  .summary-grid,
-  .student-attendance-card {
-    grid-template-columns: 1fr;
-  }
-
-  .panel-header,
-  .meeting-entry-card,
-  .attendance-header {
+@media (max-width: 960px) {
+  .meeting-entry-sheet {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .meeting-panel,
-  .attendance-panel {
-    padding: 14px;
-  }
-
-  .attendance-row {
+  .attendance-meta-grid {
     grid-template-columns: 1fr;
+    min-width: 0;
   }
 }
 </style>

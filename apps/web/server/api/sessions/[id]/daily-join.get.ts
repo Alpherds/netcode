@@ -1,7 +1,5 @@
 import { createError, getCookie, getRouterParam } from 'h3'
 
-type SessionStatus = 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
-
 type StrapiCollectionResponse<T> = {
   data: T[]
 }
@@ -14,49 +12,44 @@ type StrapiMe = {
 
 type ProfileRecord = {
   id: number
-  documentId?: string
   display_name?: string | null
   role_label?: string | null
   auth_user_id?: number | null
-  [key: string]: unknown
-}
-
-type ClassroomRef = {
-  id?: number
-  documentId?: string
-  title?: string | null
-  code?: string | null
-  term?: string | null
-  [key: string]: unknown
-}
-
-type SessionRecord = {
-  id: number
-  documentId?: string
-  title?: string | null
-  meeting_status?: SessionStatus | null
-  room_name?: string | null
-  classroom?: ClassroomRef | null
+  student_no?: string | null
+  employee_no?: string | null
   [key: string]: unknown
 }
 
 type ClassroomRecord = {
   id: number
+  title?: string | null
+  code?: string | null
+  term?: string | null
   documentId?: string
+  [key: string]: unknown
+}
+
+type SessionRecord = {
+  id: number
+  title?: string | null
+  room_name?: string | null
+  meeting_status?: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED' | string | null
+  classroom?: ClassroomRecord | null
   [key: string]: unknown
 }
 
 type EnrollmentRecord = {
   id: number
-  documentId?: string
   enrollment_status?: string | null
   [key: string]: unknown
 }
 
-type DailyRoom = {
+type DailyRoomResponse = {
   id?: string
-  name: string
-  url: string
+  name?: string
+  url?: string
+  api_created?: boolean
+  privacy?: string
   [key: string]: unknown
 }
 
@@ -64,7 +57,7 @@ type DailyTokenResponse = {
   token: string
 }
 
-type DailyJoinResponse = {
+type DailyJoinPayload = {
   roomUrl: string
   roomName: string
   token: string
@@ -74,7 +67,25 @@ type DailyJoinResponse = {
 
 const DAILY_API_BASE = 'https://api.daily.co/v1'
 
-export default defineEventHandler(async (event): Promise<DailyJoinResponse> => {
+const sanitizeRoomName = (value: string) => {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80)
+}
+
+const readDailyError = async (response: Response) => {
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+export default defineEventHandler(async (event): Promise<DailyJoinPayload> => {
   const config = useRuntimeConfig(event)
   const jwt = getCookie(event, 'netcode_jwt')
   const sessionId = getRouterParam(event, 'id')
@@ -93,7 +104,9 @@ export default defineEventHandler(async (event): Promise<DailyJoinResponse> => {
     })
   }
 
-  if (!config.DAILY_API_KEY) {
+  const dailyApiKey = String(config.DAILY_API_KEY || '').trim()
+
+  if (!dailyApiKey) {
     throw createError({
       statusCode: 500,
       statusMessage: 'Daily API key is missing',
@@ -101,19 +114,17 @@ export default defineEventHandler(async (event): Promise<DailyJoinResponse> => {
   }
 
   const strapiUrl = String(config.public.strapiUrl || '').replace(/\/$/, '')
-  const roomPrefix = String(config.DAILY_ROOM_PREFIX || 'netcode-session-')
-  const roomName = `${roomPrefix}${sessionId}`.toLowerCase()
-  const headers = {
+  const strapiHeaders = {
     Authorization: `Bearer ${jwt}`,
   }
 
   const me = await $fetch<StrapiMe>(`${strapiUrl}/api/users/me`, {
-    headers,
+    headers: strapiHeaders,
   })
 
   const profileResponse = await $fetch<StrapiCollectionResponse<ProfileRecord>>(
     `${strapiUrl}/api/profiles?filters[auth_user_id][$eq]=${me.id}`,
-    { headers }
+    { headers: strapiHeaders }
   )
 
   const profile = profileResponse.data?.[0]
@@ -125,9 +136,11 @@ export default defineEventHandler(async (event): Promise<DailyJoinResponse> => {
     })
   }
 
+  const roleLabel = String(profile.role_label || '').toUpperCase()
+
   const sessionResponse = await $fetch<StrapiCollectionResponse<SessionRecord>>(
     `${strapiUrl}/api/class-sessions?filters[id][$eq]=${sessionId}&populate=classroom`,
-    { headers }
+    { headers: strapiHeaders }
   )
 
   const session = sessionResponse.data?.[0]
@@ -139,128 +152,178 @@ export default defineEventHandler(async (event): Promise<DailyJoinResponse> => {
     })
   }
 
-  const classroomId = session.classroom?.id
-
-  if (!classroomId) {
+  if (!session.classroom?.id) {
     throw createError({
       statusCode: 404,
-      statusMessage: 'Session classroom not found',
+      statusMessage: 'Classroom not found for this session',
     })
   }
 
-  const roleLabel = String(profile.role_label || '').toUpperCase()
+  if (roleLabel === 'INSTRUCTOR' || roleLabel === 'ADMIN') {
+    const classroomUrl =
+      roleLabel === 'INSTRUCTOR'
+        ? `${strapiUrl}/api/classrooms?filters[id][$eq]=${session.classroom.id}&filters[instructor][id][$eq]=${profile.id}`
+        : `${strapiUrl}/api/classrooms?filters[id][$eq]=${session.classroom.id}`
 
-  if (roleLabel === 'INSTRUCTOR') {
-    const classroomResponse = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
-      `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&filters[instructor][id][$eq]=${profile.id}`,
-      { headers }
+    const classroomAccess = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
+      classroomUrl,
+      { headers: strapiHeaders }
     )
 
-    if (!classroomResponse.data?.[0]) {
+    if (!classroomAccess.data?.length) {
       throw createError({
         statusCode: 403,
-        statusMessage: 'You do not have access to this session',
+        statusMessage: 'You do not have access to this classroom session',
       })
     }
   } else if (roleLabel === 'STUDENT') {
-    const enrollmentResponse = await $fetch<StrapiCollectionResponse<EnrollmentRecord>>(
-      `${strapiUrl}/api/enrollments?filters[student][id][$eq]=${profile.id}&filters[classroom][id][$eq]=${classroomId}&filters[enrollment_status][$eq]=ACTIVE`,
-      { headers }
+    const enrollmentAccess = await $fetch<StrapiCollectionResponse<EnrollmentRecord>>(
+      `${strapiUrl}/api/enrollments?filters[classroom][id][$eq]=${session.classroom.id}&filters[student][id][$eq]=${profile.id}&filters[enrollment_status][$eq]=ACTIVE`,
+      { headers: strapiHeaders }
     )
 
-    if (!enrollmentResponse.data?.[0]) {
+    if (!enrollmentAccess.data?.length) {
       throw createError({
         statusCode: 403,
-        statusMessage: 'You are not enrolled in this session classroom',
+        statusMessage: 'You are not enrolled in this classroom',
       })
     }
-  } else if (roleLabel !== 'ADMIN') {
+  } else {
     throw createError({
       statusCode: 403,
       statusMessage: 'You do not have access to this session',
     })
   }
 
-  if (session.meeting_status !== 'LIVE') {
+  const rawRoomName =
+    session.room_name ||
+    `session-${session.id}-${session.classroom.code || session.classroom.id}`
+
+  const roomName = sanitizeRoomName(rawRoomName)
+
+  if (!roomName) {
     throw createError({
-      statusCode: 403,
-      statusMessage: 'Session is not live',
+      statusCode: 400,
+      statusMessage: 'Invalid room name',
     })
   }
 
-  const displayName =
-    profile.display_name?.trim() || me.username || `user-${me.id}`
-
-  const isOwner = roleLabel === 'INSTRUCTOR' || roleLabel === 'ADMIN'
-
   const dailyHeaders = {
-    Authorization: `Bearer ${config.DAILY_API_KEY}`,
+    Authorization: `Bearer ${dailyApiKey}`,
     'Content-Type': 'application/json',
   }
 
-  let room: DailyRoom | null = null
+  let roomUrl = ''
 
-  try {
-    room = await $fetch<DailyRoom>(`${DAILY_API_BASE}/rooms/${roomName}`, {
+  const existingRoomResponse = await fetch(
+    `${DAILY_API_BASE}/rooms/${encodeURIComponent(roomName)}`,
+    {
+      method: 'GET',
       headers: dailyHeaders,
-    })
-  } catch (error: any) {
-    if (error?.statusCode !== 404) {
-      throw createError({
-        statusCode: error?.statusCode || 500,
-        statusMessage:
-          error?.data?.info ||
-          error?.data?.error ||
-          error?.statusMessage ||
-          'Failed to fetch Daily room',
-      })
     }
-  }
+  )
 
-  if (!room) {
-    room = await $fetch<DailyRoom>(`${DAILY_API_BASE}/rooms`, {
+  if (existingRoomResponse.ok) {
+    const existingRoom = (await existingRoomResponse.json()) as DailyRoomResponse
+    roomUrl = String(existingRoom.url || '').trim()
+  } else if (existingRoomResponse.status === 404) {
+    const createRoomResponse = await fetch(`${DAILY_API_BASE}/rooms`, {
       method: 'POST',
       headers: dailyHeaders,
-      body: {
+      body: JSON.stringify({
         name: roomName,
         privacy: 'private',
         properties: {
           enable_prejoin_ui: false,
           start_audio_off: true,
           start_video_off: true,
-          exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24,
         },
-      },
+      }),
+    })
+
+    if (!createRoomResponse.ok) {
+      const dailyError = await readDailyError(createRoomResponse)
+      console.error('Daily create room failed:', dailyError)
+
+      throw createError({
+        statusCode: 500,
+        statusMessage:
+          dailyError?.info ||
+          dailyError?.error ||
+          'Failed to create Daily room',
+      })
+    }
+
+    const createdRoom = (await createRoomResponse.json()) as DailyRoomResponse
+    roomUrl = String(createdRoom.url || '').trim()
+  } else {
+    const dailyError = await readDailyError(existingRoomResponse)
+    console.error('Daily get room failed:', dailyError)
+
+    throw createError({
+      statusCode: 500,
+      statusMessage:
+        dailyError?.info ||
+        dailyError?.error ||
+        'Failed to fetch Daily room',
     })
   }
 
-  const now = Math.floor(Date.now() / 1000)
-  const exp = now + 60 * 60 * 4
+  if (!roomUrl) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'Daily room URL is missing',
+    })
+  }
 
-  const tokenResponse = await $fetch<DailyTokenResponse>(
-    `${DAILY_API_BASE}/meeting-tokens`,
-    {
-      method: 'POST',
-      headers: dailyHeaders,
-      body: {
-        properties: {
-          room_name: roomName,
-          exp,
-          is_owner: isOwner,
-          user_name: displayName,
-          user_id: String(me.id).slice(0, 36),
-          enable_prejoin_ui: false,
-          start_audio_off: true,
-          start_video_off: true,
-        },
+  const displayName =
+    String(profile.display_name || '').trim() ||
+    String(me.username || '').trim() ||
+    'Participant'
+
+  const isOwner = roleLabel === 'INSTRUCTOR' || roleLabel === 'ADMIN'
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const expSeconds = nowSeconds + 60 * 60 * 6
+
+  const tokenResponse = await fetch(`${DAILY_API_BASE}/meeting-tokens`, {
+    method: 'POST',
+    headers: dailyHeaders,
+    body: JSON.stringify({
+      properties: {
+        room_name: roomName,
+        user_name: displayName,
+        is_owner: isOwner,
+        exp: expSeconds,
       },
-    }
-  )
+    }),
+  })
+
+  if (!tokenResponse.ok) {
+    const dailyError = await readDailyError(tokenResponse)
+    console.error('Daily meeting token failed:', dailyError)
+
+    throw createError({
+      statusCode: 500,
+      statusMessage:
+        dailyError?.info ||
+        dailyError?.error ||
+        'Failed to create Daily meeting token',
+    })
+  }
+
+  const tokenData = (await tokenResponse.json()) as DailyTokenResponse
+
+  if (!tokenData?.token) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'Daily meeting token is missing',
+    })
+  }
 
   return {
-    roomUrl: room.url,
+    roomUrl,
     roomName,
-    token: tokenResponse.token,
+    token: tokenData.token,
     displayName,
     isOwner,
   }

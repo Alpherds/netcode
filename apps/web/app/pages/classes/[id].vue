@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { definePageMeta, navigateTo, useFetch, useRoute } from '#imports'
 import EnrollmentManager from '~/components/EnrollmentManager.vue'
 
@@ -85,10 +85,6 @@ const canManageEnrollments = computed(
   () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
 )
 
-const canManageClassroomStatus = computed(
-  () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
-)
-
 const canEditClassroom = computed(
   () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
 )
@@ -98,22 +94,18 @@ const classroomStatus = computed(() =>
 )
 
 const isOpenClassroom = computed(() => classroomStatus.value === 'OPEN')
-const isClosedClassroom = computed(() => classroomStatus.value === 'CLOSED')
 const isArchivedClassroom = computed(() => classroomStatus.value === 'ARCHIVED')
 
 const safeSessions = computed(() => sessions.value ?? [])
-const liveSessions = computed(() =>
-  safeSessions.value.filter(
-    (item) => String(item.meeting_status || '').toUpperCase() === 'LIVE'
-  )
-)
-const upcomingSessions = computed(() =>
-  safeSessions.value.filter(
-    (item) => String(item.meeting_status || '').toUpperCase() === 'SCHEDULED'
-  )
-)
 
 const currentSessionFilter = ref<SessionFilter>('ALL')
+const sessionSearch = ref('')
+
+const liveSessionsCount = computed(() =>
+  safeSessions.value.filter(
+    (item) => String(item.meeting_status || '').toUpperCase() === 'LIVE'
+  ).length
+)
 
 const scheduledSessionsCount = computed(() =>
   safeSessions.value.filter(
@@ -134,14 +126,27 @@ const cancelledSessionsCount = computed(() =>
 )
 
 const filteredSessions = computed(() => {
-  if (currentSessionFilter.value === 'ALL') {
-    return safeSessions.value
-  }
+  const byStatus =
+    currentSessionFilter.value === 'ALL'
+      ? safeSessions.value
+      : safeSessions.value.filter(
+          (item) =>
+            String(item.meeting_status || '').toUpperCase() ===
+            currentSessionFilter.value
+        )
 
-  return safeSessions.value.filter(
-    (item) =>
-      String(item.meeting_status || '').toUpperCase() === currentSessionFilter.value
-  )
+  const keyword = sessionSearch.value.trim().toLowerCase()
+
+  if (!keyword) return byStatus
+
+  return byStatus.filter((item) => {
+    return (
+      String(item.title || '').toLowerCase().includes(keyword) ||
+      String(item.room_name || '').toLowerCase().includes(keyword) ||
+      String(item.notes || '').toLowerCase().includes(keyword) ||
+      String(item.meeting_status || '').toLowerCase().includes(keyword)
+    )
+  })
 })
 
 const sessionFilterLabel = computed(() => {
@@ -159,19 +164,19 @@ const sessionFilterLabel = computed(() => {
   }
 })
 
-const showCreateForm = ref(false)
+const showCreateDialog = ref(false)
 const isSubmitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
 
-const updatingClassroomStatus = ref(false)
-const classroomStatusError = ref('')
-const classroomStatusSuccess = ref('')
-
-const showEditClassroomForm = ref(false)
+const showEditClassroomDialog = ref(false)
 const isSavingClassroom = ref(false)
 const editClassroomError = ref('')
 const editClassroomSuccess = ref('')
+
+const pageAlertType = ref<'success' | 'error' | 'info' | 'warning'>('success')
+const pageAlertMessage = ref('')
+const showPageAlert = ref(false)
 
 const form = ref<CreateSessionForm>({
   title: '',
@@ -189,6 +194,26 @@ const editClassroomForm = ref<EditClassroomForm>({
   description: '',
   term: '',
 })
+
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+let pageAlertTimer: ReturnType<typeof setTimeout> | null = null
+
+const showAlert = (
+  type: 'success' | 'error' | 'info' | 'warning',
+  message: string
+) => {
+  pageAlertType.value = type
+  pageAlertMessage.value = message
+  showPageAlert.value = true
+
+  if (pageAlertTimer) {
+    clearTimeout(pageAlertTimer)
+  }
+
+  pageAlertTimer = setTimeout(() => {
+    showPageAlert.value = false
+  }, 3000)
+}
 
 const syncEditClassroomForm = () => {
   editClassroomForm.value = {
@@ -214,26 +239,27 @@ const resetForm = () => {
   formSuccess.value = ''
 }
 
-const toggleCreateForm = () => {
+const openCreateDialog = () => {
   if (!isInstructor.value || !isOpenClassroom.value) return
-
-  showCreateForm.value = !showCreateForm.value
-
-  if (!showCreateForm.value) {
-    resetForm()
-  }
+  resetForm()
+  showCreateDialog.value = true
 }
 
-const toggleEditClassroomForm = () => {
-  if (!canEditClassroom.value || isArchivedClassroom.value) return
+const closeCreateDialog = () => {
+  showCreateDialog.value = false
+  resetForm()
+}
 
-  showEditClassroomForm.value = !showEditClassroomForm.value
+const openEditClassroomDialog = () => {
+  if (!canEditClassroom.value || isArchivedClassroom.value) return
+  syncEditClassroomForm()
   editClassroomError.value = ''
   editClassroomSuccess.value = ''
+  showEditClassroomDialog.value = true
+}
 
-  if (showEditClassroomForm.value) {
-    syncEditClassroomForm()
-  }
+const closeEditClassroomDialog = () => {
+  showEditClassroomDialog.value = false
 }
 
 const submitSession = async () => {
@@ -265,8 +291,8 @@ const submitSession = async () => {
 
     formSuccess.value = 'Session created successfully.'
     await refreshSessions()
-    resetForm()
-    showCreateForm.value = false
+    closeCreateDialog()
+    showAlert('success', 'Session created successfully.')
   } catch (error: any) {
     formError.value =
       error?.data?.message ||
@@ -299,9 +325,7 @@ const submitEditClassroom = async () => {
   isSavingClassroom.value = true
 
   try {
-    const updateClassroomUrl: string = `/api/classrooms/${classroomId}`
-
-    const updated = await $fetch<Classroom>(updateClassroomUrl, {
+    const updated = await $fetch<Classroom>(`/api/classrooms/${classroomId}`, {
       method: 'PUT',
       body: {
         title: editClassroomForm.value.title,
@@ -313,8 +337,9 @@ const submitEditClassroom = async () => {
 
     classroom.value = updated
     editClassroomSuccess.value = 'Classroom updated successfully.'
-    showEditClassroomForm.value = false
+    closeEditClassroomDialog()
     await refreshClassroom()
+    showAlert('success', 'Classroom updated successfully.')
   } catch (error: any) {
     editClassroomError.value =
       error?.data?.message ||
@@ -325,50 +350,8 @@ const submitEditClassroom = async () => {
   }
 }
 
-const updateClassroomStatus = async (
-  nextStatus: 'OPEN' | 'CLOSED' | 'ARCHIVED'
-) => {
-  classroomStatusError.value = ''
-  classroomStatusSuccess.value = ''
-  updatingClassroomStatus.value = true
-
-  try {
-    const updateStatusUrl: string = `/api/classrooms/${classroomId}/status`
-
-    await $fetch(updateStatusUrl, {
-      method: 'POST',
-      body: {
-        class_status: nextStatus,
-      },
-    })
-
-    if (nextStatus !== 'OPEN') {
-      showCreateForm.value = false
-      resetForm()
-    }
-
-    if (nextStatus === 'ARCHIVED') {
-      showEditClassroomForm.value = false
-    }
-
-    classroomStatusSuccess.value = `Classroom marked as ${nextStatus}.`
-    await Promise.all([refreshClassroom(), refreshSessions()])
-  } catch (error: any) {
-    classroomStatusError.value =
-      error?.data?.message ||
-      error?.statusMessage ||
-      'Failed to update classroom status.'
-  } finally {
-    updatingClassroomStatus.value = false
-  }
-}
-
 const goBack = async () => {
   await navigateTo('/')
-}
-
-const refreshAll = async () => {
-  await Promise.all([refreshClassroom(), refreshSessions()])
 }
 
 const formatDateTime = (value?: string | null) => {
@@ -376,36 +359,36 @@ const formatDateTime = (value?: string | null) => {
   return new Date(value).toLocaleString()
 }
 
-const badgeClass = (status?: string | null) => {
-  switch (status) {
+const badgeColor = (status?: string | null) => {
+  switch (String(status || '').toUpperCase()) {
     case 'SCHEDULED':
-      return 'badge badge-scheduled'
+      return 'info'
     case 'LIVE':
-      return 'badge badge-live'
+      return 'success'
     case 'ENDED':
-      return 'badge badge-ended'
+      return 'grey'
     case 'CANCELLED':
-      return 'badge badge-cancelled'
+      return 'error'
     default:
-      return 'badge'
+      return 'grey'
   }
 }
 
-const classroomStatusPillClass = (status?: string | null) => {
-  switch (String(status || '').toUpperCase()) {
+const classroomStatusColor = computed(() => {
+  switch (String(classroom.value?.class_status || '').toUpperCase()) {
     case 'OPEN':
-      return 'status-pill status-open'
+      return 'success'
     case 'CLOSED':
-      return 'status-pill status-closed'
+      return 'warning'
     case 'ARCHIVED':
-      return 'status-pill status-archived'
+      return 'grey'
     default:
-      return 'status-pill'
+      return 'grey'
   }
-}
+})
 
 const statusLabel = (status?: string | null) => {
-  switch (status) {
+  switch (String(status || '').toUpperCase()) {
     case 'SCHEDULED':
       return 'Waiting to start'
     case 'LIVE':
@@ -420,7 +403,7 @@ const statusLabel = (status?: string | null) => {
 }
 
 const sessionHint = (status?: string | null) => {
-  switch (status) {
+  switch (String(status || '').toUpperCase()) {
     case 'SCHEDULED':
       return 'Students can enter after the instructor starts the session.'
     case 'LIVE':
@@ -461,938 +444,677 @@ const sessionsErrorMessage = computed(() => {
 
   return 'Failed to load sessions.'
 })
+
+const startAutoRefresh = () => {
+  if (autoRefreshTimer) return
+
+  autoRefreshTimer = setInterval(async () => {
+    if (document.hidden) return
+    await Promise.allSettled([refreshClassroom(), refreshSessions()])
+  }, 20000)
+}
+
+const stopAutoRefresh = () => {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
+onMounted(() => {
+  startAutoRefresh()
+})
+
+onBeforeUnmount(() => {
+  stopAutoRefresh()
+
+  if (pageAlertTimer) {
+    clearTimeout(pageAlertTimer)
+    pageAlertTimer = null
+  }
+})
 </script>
 
 <template>
-  <div class="page">
-    <header class="hero">
-      <div>
-        <button class="back-btn" @click="goBack">← Back to Dashboard</button>
-        <h1>{{ classroom?.title || 'Classroom Details' }}</h1>
-        <p class="subtitle">
-          {{ classroom?.code || 'No code' }} · {{ classroom?.term || 'No term' }}
-        </p>
-      </div>
+  <v-container fluid class="classroom-page pa-4 pa-md-6">
+    <v-alert
+      v-if="showPageAlert"
+      v-model="showPageAlert"
+      :type="pageAlertType"
+      closable
+      variant="tonal"
+      class="mb-4"
+    >
+      {{ pageAlertMessage }}
+    </v-alert>
 
-      <div class="hero-actions">
-        <button
-          v-if="isInstructor"
-          class="btn btn-secondary"
-          :disabled="!isOpenClassroom"
-          @click="toggleCreateForm"
-        >
-          {{
-            isOpenClassroom
-              ? (showCreateForm ? 'Close Form' : 'Create Session')
-              : 'Classroom Not Open'
-          }}
-        </button>
-
-        <button
-          v-if="canEditClassroom"
-          class="btn btn-edit"
-          :disabled="isArchivedClassroom"
-          @click="toggleEditClassroomForm"
-        >
-          {{
-            isArchivedClassroom
-              ? 'Archived Classroom'
-              : (showEditClassroomForm ? 'Close Edit' : 'Edit Classroom')
-          }}
-        </button>
-
-        <button class="btn" @click="refreshAll">Refresh</button>
-      </div>
-    </header>
-
-    <section v-if="classroomPending" class="panel">
+    <v-alert
+      v-if="classroomPending"
+      type="info"
+      variant="tonal"
+      class="mb-4"
+    >
       Loading classroom...
-    </section>
+    </v-alert>
 
-    <section v-else-if="classroomError" class="panel error">
+    <v-alert
+      v-else-if="classroomError"
+      type="error"
+      variant="tonal"
+      class="mb-4"
+    >
       {{ classroomErrorMessage }}
-    </section>
+    </v-alert>
 
     <template v-else>
-      <section class="panel">
-        <div class="class-header">
-          <div>
-            <h2>{{ classroom?.title }}</h2>
-            <p>{{ classroom?.description || 'No description provided.' }}</p>
+      <v-card rounded="xl" elevation="4" class="hero-card mb-6">
+        <v-card-text class="pa-5 pa-md-7">
+          <div class="d-flex justify-space-between align-start flex-wrap ga-4 mb-5">
+            <v-btn
+              variant="text"
+              color="primary"
+              rounded="pill"
+              prepend-icon="mdi-arrow-left"
+              class="back-button"
+              @click="goBack"
+            >
+              Back to Dashboard
+            </v-btn>
+
+            <v-chip
+              :color="classroomStatusColor"
+              variant="tonal"
+              rounded="pill"
+              size="large"
+            >
+              {{ classroom?.class_status || 'UNKNOWN' }}
+            </v-chip>
           </div>
 
-          <span :class="classroomStatusPillClass(classroom?.class_status)">
-            {{ classroom?.class_status || 'UNKNOWN' }}
-          </span>
-        </div>
-
-        <div
-          v-if="canManageClassroomStatus"
-          class="classroom-status-actions"
-        >
-          <button
-            v-if="!isOpenClassroom"
-            class="btn btn-open"
-            :disabled="updatingClassroomStatus"
-            @click="updateClassroomStatus('OPEN')"
-          >
-            {{ updatingClassroomStatus ? 'Updating...' : 'Open Classroom' }}
-          </button>
-
-          <button
-            v-if="isOpenClassroom"
-            class="btn btn-close"
-            :disabled="updatingClassroomStatus"
-            @click="updateClassroomStatus('CLOSED')"
-          >
-            {{ updatingClassroomStatus ? 'Updating...' : 'Close Classroom' }}
-          </button>
-
-          <button
-            v-if="!isArchivedClassroom"
-            class="btn btn-archive"
-            :disabled="updatingClassroomStatus"
-            @click="updateClassroomStatus('ARCHIVED')"
-          >
-            {{ updatingClassroomStatus ? 'Updating...' : 'Archive Classroom' }}
-          </button>
-        </div>
-
-        <p v-if="classroomStatusError" class="form-message form-error">
-          {{ classroomStatusError }}
-        </p>
-
-        <p v-if="classroomStatusSuccess" class="form-message form-success">
-          {{ classroomStatusSuccess }}
-        </p>
-
-        <div v-if="!isOpenClassroom" class="classroom-status-notice">
-          <strong>
-            {{
-              isArchivedClassroom
-                ? 'This classroom is archived.'
-                : 'This classroom is closed.'
-            }}
-          </strong>
-          <p>
-            New sessions cannot be created unless the classroom is set back to
-            OPEN.
-          </p>
-        </div>
-
-        <div v-if="isStudent" class="student-callout">
-          <strong>Student View</strong>
-          <p>
-            You can only enter sessions that are currently marked as
-            <strong>LIVE</strong>.
-          </p>
-        </div>
-
-        <div v-else class="student-callout instructor-callout">
-          <strong>Instructor View</strong>
-          <p>
-            Start a session to allow enrolled students to enter the meeting room.
-          </p>
-        </div>
-      </section>
-
-      <section
-        v-if="showEditClassroomForm && canEditClassroom && !isArchivedClassroom"
-        class="panel"
-      >
-        <div class="panel-header">
-          <h2>Edit Classroom</h2>
-        </div>
-
-        <div class="form-grid">
-          <div class="form-group">
-            <label>Title</label>
-            <input
-              v-model="editClassroomForm.title"
-              type="text"
-              placeholder="Enter classroom title"
-            />
-          </div>
-
-          <div class="form-group">
-            <label>Code</label>
-            <input
-              v-model="editClassroomForm.code"
-              type="text"
-              placeholder="Enter classroom code"
-            />
-          </div>
-
-          <div class="form-group full">
-            <label>Description</label>
-            <textarea
-              v-model="editClassroomForm.description"
-              rows="4"
-              placeholder="Enter classroom description"
-            />
-          </div>
-
-          <div class="form-group">
-            <label>Term</label>
-            <input
-              v-model="editClassroomForm.term"
-              type="text"
-              placeholder="e.g. 1st Semester AY 2026-2027"
-            />
-          </div>
-        </div>
-
-        <p v-if="editClassroomError" class="form-message form-error">
-          {{ editClassroomError }}
-        </p>
-
-        <p v-if="editClassroomSuccess" class="form-message form-success">
-          {{ editClassroomSuccess }}
-        </p>
-
-        <div class="form-actions">
-          <button
-            class="btn btn-light"
-            :disabled="isSavingClassroom"
-            @click="syncEditClassroomForm"
-          >
-            Reset
-          </button>
-
-          <button
-            class="btn btn-primary"
-            :disabled="isSavingClassroom"
-            @click="submitEditClassroom"
-          >
-            {{ isSavingClassroom ? 'Saving...' : 'Save Changes' }}
-          </button>
-        </div>
-      </section>
-
-      <section
-        v-if="showCreateForm && isInstructor && isOpenClassroom"
-        class="panel"
-      >
-        <div class="panel-header">
-          <h2>Create Session</h2>
-        </div>
-
-        <div class="form-grid">
-          <div class="form-group full">
-            <label>Session Title</label>
-            <input
-              v-model="form.title"
-              type="text"
-              placeholder="Enter session title"
-            />
-          </div>
-
-          <div class="form-group">
-            <label>Start Date & Time</label>
-            <input v-model="form.starts_at" type="datetime-local" />
-          </div>
-
-          <div class="form-group">
-            <label>End Date & Time</label>
-            <input v-model="form.ends_at" type="datetime-local" />
-          </div>
-
-          <div class="form-group">
-            <label>Room Name</label>
-            <input
-              v-model="form.room_name"
-              type="text"
-              placeholder="Optional room name"
-            />
-          </div>
-
-          <div class="form-group">
-            <label>Meeting Provider</label>
-            <select v-model="form.meeting_provider">
-              <option value="DAILY">DAILY</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label>Meeting Status</label>
-            <select v-model="form.meeting_status">
-              <option value="SCHEDULED">SCHEDULED</option>
-              <option value="LIVE">LIVE</option>
-              <option value="ENDED">ENDED</option>
-              <option value="CANCELLED">CANCELLED</option>
-            </select>
-          </div>
-
-          <div class="form-group full">
-            <label>Notes</label>
-            <textarea
-              v-model="form.notes"
-              rows="4"
-              placeholder="Optional notes"
-            />
-          </div>
-        </div>
-
-        <p v-if="formError" class="form-message form-error">
-          {{ formError }}
-        </p>
-
-        <p v-if="formSuccess" class="form-message form-success">
-          {{ formSuccess }}
-        </p>
-
-        <div class="form-actions">
-          <button
-            class="btn btn-light"
-            :disabled="isSubmitting"
-            @click="resetForm"
-          >
-            Reset
-          </button>
-
-          <button
-            class="btn btn-primary"
-            :disabled="isSubmitting"
-            @click="submitSession"
-          >
-            {{ isSubmitting ? 'Creating...' : 'Save Session' }}
-          </button>
-        </div>
-      </section>
-
-<section v-if="canManageEnrollments && !isArchivedClassroom" class="panel">
-  <EnrollmentManager
-    :classroom-id="classroomId"
-    :can-manage="canManageEnrollments"
-  />
-</section>
-
-<section
-  v-else-if="canManageEnrollments && isArchivedClassroom"
-  class="panel"
->
-  <div class="empty-state">
-    Enrollment management is disabled for archived classrooms.
-  </div>
-</section>
-
-      <section class="panel">
-<div class="panel-header session-panel-header">
-  <div>
-    <h2>Sessions</h2>
-    <p class="session-panel-subtitle">
-      Showing {{ filteredSessions.length }} of {{ safeSessions.length }} sessions
-    </p>
-  </div>
-
-  <span class="count">{{ filteredSessions.length }}</span>
-</div>
-
-<div class="session-filters">
-  <button
-    class="filter-btn"
-    :class="{ active: currentSessionFilter === 'ALL' }"
-    @click="currentSessionFilter = 'ALL'"
-  >
-    All
-    <span class="filter-count">{{ safeSessions.length }}</span>
-  </button>
-
-  <button
-    class="filter-btn"
-    :class="{ active: currentSessionFilter === 'SCHEDULED' }"
-    @click="currentSessionFilter = 'SCHEDULED'"
-  >
-    Scheduled
-    <span class="filter-count">{{ scheduledSessionsCount }}</span>
-  </button>
-
-  <button
-    class="filter-btn"
-    :class="{ active: currentSessionFilter === 'LIVE' }"
-    @click="currentSessionFilter = 'LIVE'"
-  >
-    Live
-    <span class="filter-count">{{ liveSessions.length }}</span>
-  </button>
-
-  <button
-    class="filter-btn"
-    :class="{ active: currentSessionFilter === 'ENDED' }"
-    @click="currentSessionFilter = 'ENDED'"
-  >
-    Ended
-    <span class="filter-count">{{ endedSessionsCount }}</span>
-  </button>
-
-  <button
-    class="filter-btn"
-    :class="{ active: currentSessionFilter === 'CANCELLED' }"
-    @click="currentSessionFilter = 'CANCELLED'"
-  >
-    Cancelled
-    <span class="filter-count">{{ cancelledSessionsCount }}</span>
-  </button>
-</div>
-
-        <div v-if="isStudent" class="session-summary-strip">
-          <div class="summary-mini-card live-mini">
-            <span>Live</span>
-            <strong>{{ liveSessions.length }}</strong>
-          </div>
-
-          <div class="summary-mini-card scheduled-mini">
-            <span>Scheduled</span>
-            <strong>{{ upcomingSessions.length }}</strong>
-          </div>
-        </div>
-
-        <div v-if="sessionsPending" class="empty-state">
-          Loading sessions...
-        </div>
-
-        <div v-else-if="sessionsError" class="empty-state error">
-          {{ sessionsErrorMessage }}
-        </div>
-
-<div v-else-if="safeSessions.length === 0" class="empty-state">
-  {{
-    isStudent
-      ? 'No sessions are available for this classroom yet.'
-      : 'No sessions yet. Create the first session to get started.'
-  }}
-</div>
-
-<div v-else-if="filteredSessions.length === 0" class="empty-state">
-  No {{ sessionFilterLabel }} sessions found for this classroom.
-</div>
-
-        <div v-else class="session-list">
-<article
-  v-for="session in filteredSessions"
-  :key="session.id"
-  class="session-card"
->
-            <div class="session-top">
-              <div>
-                <h3>{{ session.title || 'Untitled Session' }}</h3>
-                <p>{{ session.room_name || 'No room name' }}</p>
+          <div class="d-flex flex-column flex-lg-row justify-space-between align-start ga-6">
+            <div class="hero-copy">
+              <div class="text-overline text-primary font-weight-bold mb-2">
+                Classroom Space
               </div>
 
-              <span :class="badgeClass(session.meeting_status)">
-                {{ statusLabel(session.meeting_status) }}
-              </span>
+              <div class="text-h4 font-weight-bold mb-2">
+                {{ classroom?.title || 'Classroom Details' }}
+              </div>
+
+              <div class="d-flex flex-wrap ga-2 mb-4">
+                <v-chip color="primary" variant="outlined" rounded="pill">
+                  {{ classroom?.code || 'No code' }}
+                </v-chip>
+                <v-chip color="grey-darken-1" variant="outlined" rounded="pill">
+                  {{ classroom?.term || 'No term' }}
+                </v-chip>
+              </div>
+
+              <p class="text-body-1 text-medium-emphasis mb-0">
+                {{ classroom?.description || 'No description provided.' }}
+              </p>
             </div>
 
-            <div class="session-meta">
-              <p><strong>Start:</strong> {{ formatDateTime(session.starts_at) }}</p>
-              <p><strong>End:</strong> {{ formatDateTime(session.ends_at) }}</p>
-              <p><strong>Provider:</strong> {{ session.meeting_provider || '—' }}</p>
-            </div>
-
-            <p class="notes">{{ session.notes || 'No notes provided.' }}</p>
-            <p class="session-hint">{{ sessionHint(session.meeting_status) }}</p>
-
-            <div class="session-actions">
-              <button
-                class="btn btn-primary"
-                @click="openSession(session.id)"
+            <div
+              v-if="isInstructor"
+              class="hero-action-stack d-flex flex-wrap ga-3 justify-end"
+            >
+              <v-btn
+                color="primary"
+                rounded="pill"
+                size="large"
+                prepend-icon="mdi-video-plus-outline"
+                :disabled="!isOpenClassroom"
+                @click="openCreateDialog"
               >
-                {{
-                  String(session.meeting_status || '').toUpperCase() === 'LIVE'
-                    ? 'Enter Session'
-                    : 'View Session'
-                }}
-              </button>
+                Create Session
+              </v-btn>
+
+              <v-btn
+                color="teal-darken-1"
+                rounded="pill"
+                size="large"
+                prepend-icon="mdi-pencil-outline"
+                :disabled="isArchivedClassroom"
+                @click="openEditClassroomDialog"
+              >
+                Edit Classroom
+              </v-btn>
             </div>
-          </article>
-        </div>
-      </section>
+          </div>
+
+          <v-alert
+            v-if="!isOpenClassroom"
+            type="warning"
+            variant="tonal"
+            class="mt-5"
+          >
+            {{
+              isArchivedClassroom
+                ? 'This classroom is archived. Sessions and enrollment changes are disabled.'
+                : 'This classroom is closed. New sessions cannot be created until it is reopened elsewhere.'
+            }}
+          </v-alert>
+
+          <v-alert
+            v-if="isStudent"
+            type="info"
+            variant="tonal"
+            class="mt-5"
+          >
+            You can only enter sessions that are currently marked as
+            <strong>LIVE</strong>.
+          </v-alert>
+
+          <v-alert
+            v-else
+            type="success"
+            variant="tonal"
+            class="mt-5"
+          >
+            Start a session to allow enrolled students to enter the meeting room.
+          </v-alert>
+        </v-card-text>
+      </v-card>
+
+      <v-dialog v-model="showEditClassroomDialog" max-width="820">
+        <v-card rounded="xl">
+          <v-card-title class="text-h5 font-weight-bold pt-5 px-5">
+            Edit Classroom
+          </v-card-title>
+
+          <v-card-text class="px-5 pt-3">
+            <v-alert
+              v-if="editClassroomError"
+              type="error"
+              variant="tonal"
+              class="mb-4"
+            >
+              {{ editClassroomError }}
+            </v-alert>
+
+            <v-alert
+              v-if="editClassroomSuccess"
+              type="success"
+              variant="tonal"
+              class="mb-4"
+            >
+              {{ editClassroomSuccess }}
+            </v-alert>
+
+            <v-row dense>
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="editClassroomForm.title"
+                  label="Title"
+                  rounded="xl"
+                />
+              </v-col>
+
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="editClassroomForm.code"
+                  label="Code"
+                  rounded="xl"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-textarea
+                  v-model="editClassroomForm.description"
+                  label="Description"
+                  rounded="xl"
+                  rows="4"
+                  auto-grow
+                />
+              </v-col>
+
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="editClassroomForm.term"
+                  label="Term"
+                  rounded="xl"
+                />
+              </v-col>
+            </v-row>
+          </v-card-text>
+
+          <v-card-actions class="px-5 pb-5">
+            <v-spacer />
+            <v-btn variant="text" rounded="pill" @click="closeEditClassroomDialog">
+              Cancel
+            </v-btn>
+            <v-btn
+              color="primary"
+              rounded="pill"
+              :loading="isSavingClassroom"
+              @click="submitEditClassroom"
+            >
+              Save Changes
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <v-dialog v-model="showCreateDialog" max-width="920">
+        <v-card rounded="xl">
+          <v-card-title class="text-h5 font-weight-bold pt-5 px-5">
+            Create Session
+          </v-card-title>
+
+          <v-card-text class="px-5 pt-3">
+            <v-alert
+              v-if="formError"
+              type="error"
+              variant="tonal"
+              class="mb-4"
+            >
+              {{ formError }}
+            </v-alert>
+
+            <v-alert
+              v-if="formSuccess"
+              type="success"
+              variant="tonal"
+              class="mb-4"
+            >
+              {{ formSuccess }}
+            </v-alert>
+
+            <v-row dense>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="form.title"
+                  label="Session Title"
+                  rounded="xl"
+                />
+              </v-col>
+
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="form.starts_at"
+                  label="Start Date & Time"
+                  type="datetime-local"
+                  rounded="xl"
+                />
+              </v-col>
+
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="form.ends_at"
+                  label="End Date & Time"
+                  type="datetime-local"
+                  rounded="xl"
+                />
+              </v-col>
+
+              <v-col cols="12" md="6">
+                <v-text-field
+                  v-model="form.room_name"
+                  label="Room Name"
+                  rounded="xl"
+                />
+              </v-col>
+
+              <v-col cols="12" md="6">
+                <v-select
+                  v-model="form.meeting_status"
+                  label="Meeting Status"
+                  rounded="xl"
+                  :items="['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED']"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-textarea
+                  v-model="form.notes"
+                  label="Notes"
+                  rounded="xl"
+                  rows="4"
+                  auto-grow
+                />
+              </v-col>
+            </v-row>
+          </v-card-text>
+
+          <v-card-actions class="px-5 pb-5">
+            <v-spacer />
+            <v-btn variant="text" rounded="pill" @click="closeCreateDialog">
+              Cancel
+            </v-btn>
+            <v-btn
+              color="primary"
+              rounded="pill"
+              :loading="isSubmitting"
+              @click="submitSession"
+            >
+              Save Session
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <v-card
+        v-if="canManageEnrollments && !isArchivedClassroom"
+        rounded="xl"
+        elevation="3"
+        class="section-card mb-6"
+      >
+        <v-card-text class="pa-5">
+          <EnrollmentManager
+            :classroom-id="classroomId"
+            :can-manage="canManageEnrollments"
+          />
+        </v-card-text>
+      </v-card>
+
+      <v-card
+        v-else-if="canManageEnrollments && isArchivedClassroom"
+        rounded="xl"
+        elevation="3"
+        class="section-card mb-6"
+      >
+        <v-card-text class="pa-5">
+          <v-alert type="warning" variant="tonal">
+            Enrollment management is disabled for archived classrooms.
+          </v-alert>
+        </v-card-text>
+      </v-card>
+
+      <v-card rounded="xl" elevation="3" class="section-card">
+        <v-card-text class="pa-5">
+          <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4">
+            <div>
+              <div class="text-h5 font-weight-bold">Sessions</div>
+              <div class="text-body-2 text-medium-emphasis">
+                Showing {{ filteredSessions.length }} of {{ safeSessions.length }} sessions
+              </div>
+            </div>
+
+            <v-chip color="primary" variant="tonal" rounded="pill">
+              {{ filteredSessions.length }}
+            </v-chip>
+          </div>
+
+          <v-text-field
+            v-model="sessionSearch"
+            prepend-inner-icon="mdi-magnify"
+            label="Search sessions"
+            rounded="xl"
+            hide-details
+            class="mb-4"
+          />
+
+          <div class="filter-row mb-4">
+            <v-chip
+              :color="currentSessionFilter === 'ALL' ? 'primary' : undefined"
+              :variant="currentSessionFilter === 'ALL' ? 'flat' : 'outlined'"
+              rounded="pill"
+              class="filter-chip"
+              @click="currentSessionFilter = 'ALL'"
+            >
+              All
+              <span class="chip-count">{{ safeSessions.length }}</span>
+            </v-chip>
+
+            <v-chip
+              :color="currentSessionFilter === 'SCHEDULED' ? 'primary' : undefined"
+              :variant="currentSessionFilter === 'SCHEDULED' ? 'flat' : 'outlined'"
+              rounded="pill"
+              class="filter-chip"
+              @click="currentSessionFilter = 'SCHEDULED'"
+            >
+              Scheduled
+              <span class="chip-count">{{ scheduledSessionsCount }}</span>
+            </v-chip>
+
+            <v-chip
+              :color="currentSessionFilter === 'LIVE' ? 'primary' : undefined"
+              :variant="currentSessionFilter === 'LIVE' ? 'flat' : 'outlined'"
+              rounded="pill"
+              class="filter-chip"
+              @click="currentSessionFilter = 'LIVE'"
+            >
+              Live
+              <span class="chip-count">{{ liveSessionsCount }}</span>
+            </v-chip>
+
+            <v-chip
+              :color="currentSessionFilter === 'ENDED' ? 'primary' : undefined"
+              :variant="currentSessionFilter === 'ENDED' ? 'flat' : 'outlined'"
+              rounded="pill"
+              class="filter-chip"
+              @click="currentSessionFilter = 'ENDED'"
+            >
+              Ended
+              <span class="chip-count">{{ endedSessionsCount }}</span>
+            </v-chip>
+
+            <v-chip
+              :color="currentSessionFilter === 'CANCELLED' ? 'primary' : undefined"
+              :variant="currentSessionFilter === 'CANCELLED' ? 'flat' : 'outlined'"
+              rounded="pill"
+              class="filter-chip"
+              @click="currentSessionFilter = 'CANCELLED'"
+            >
+              Cancelled
+              <span class="chip-count">{{ cancelledSessionsCount }}</span>
+            </v-chip>
+          </div>
+
+          <div
+            v-if="isStudent"
+            class="d-flex flex-wrap ga-3 mb-4"
+          >
+            <v-sheet
+              rounded="xl"
+              color="success"
+              variant="tonal"
+              class="summary-box pa-4"
+            >
+              <div class="text-overline">Live</div>
+              <div class="text-h5 font-weight-bold">{{ liveSessionsCount }}</div>
+            </v-sheet>
+
+            <v-sheet
+              rounded="xl"
+              color="info"
+              variant="tonal"
+              class="summary-box pa-4"
+            >
+              <div class="text-overline">Scheduled</div>
+              <div class="text-h5 font-weight-bold">{{ scheduledSessionsCount }}</div>
+            </v-sheet>
+          </div>
+
+          <v-alert
+            v-if="sessionsPending"
+            type="info"
+            variant="tonal"
+          >
+            Loading sessions...
+          </v-alert>
+
+          <v-alert
+            v-else-if="sessionsError"
+            type="error"
+            variant="tonal"
+          >
+            {{ sessionsErrorMessage }}
+          </v-alert>
+
+          <v-alert
+            v-else-if="safeSessions.length === 0"
+            type="info"
+            variant="tonal"
+          >
+            {{
+              isStudent
+                ? 'No sessions are available for this classroom yet.'
+                : 'No sessions yet. Create the first session to get started.'
+            }}
+          </v-alert>
+
+          <v-alert
+            v-else-if="filteredSessions.length === 0"
+            type="info"
+            variant="tonal"
+          >
+            No {{ sessionFilterLabel }} sessions found for this classroom.
+          </v-alert>
+
+          <v-row v-else dense>
+            <v-col
+              v-for="session in filteredSessions"
+              :key="session.id"
+              cols="12"
+            >
+              <v-card rounded="xl" elevation="2" class="session-card">
+                <v-card-text class="pa-4 pa-md-5">
+                  <div class="d-flex justify-space-between align-start flex-wrap ga-3 mb-4">
+                    <div>
+                      <div class="text-h6 font-weight-bold">
+                        {{ session.title || 'Untitled Session' }}
+                      </div>
+                      <div class="text-body-2 text-primary font-weight-medium mt-1">
+                        {{ session.room_name || 'No room name' }}
+                      </div>
+                    </div>
+
+                    <v-chip
+                      :color="badgeColor(session.meeting_status)"
+                      variant="tonal"
+                      rounded="pill"
+                    >
+                      {{ statusLabel(session.meeting_status) }}
+                    </v-chip>
+                  </div>
+
+                  <v-row dense class="mb-3">
+                    <v-col cols="12" md="6">
+                      <v-sheet rounded="lg" color="surface-variant" class="pa-3">
+                        <div class="text-caption text-medium-emphasis">Start</div>
+                        <div class="font-weight-medium">
+                          {{ formatDateTime(session.starts_at) }}
+                        </div>
+                      </v-sheet>
+                    </v-col>
+
+                    <v-col cols="12" md="6">
+                      <v-sheet rounded="lg" color="surface-variant" class="pa-3">
+                        <div class="text-caption text-medium-emphasis">End</div>
+                        <div class="font-weight-medium">
+                          {{ formatDateTime(session.ends_at) }}
+                        </div>
+                      </v-sheet>
+                    </v-col>
+                  </v-row>
+
+                  <div class="text-body-2 text-medium-emphasis mb-2">
+                    {{ session.notes || 'No notes provided.' }}
+                  </div>
+
+                  <div class="text-body-2 text-medium-emphasis mb-4">
+                    {{ sessionHint(session.meeting_status) }}
+                  </div>
+
+                  <div class="d-flex justify-end">
+                    <v-btn
+                      color="primary"
+                      rounded="pill"
+                      prepend-icon="mdi-open-in-new"
+                      @click="openSession(session.id)"
+                    >
+                      {{
+                        String(session.meeting_status || '').toUpperCase() === 'LIVE'
+                          ? 'Enter Session'
+                          : 'View Session'
+                      }}
+                    </v-btn>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
     </template>
-  </div>
+  </v-container>
 </template>
 
 <style scoped>
-.page {
+.classroom-page {
   min-height: 100vh;
-  padding: 32px 24px 48px;
-  background: #f6f8fb;
-  color: #1f2937;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.06), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(99, 102, 241, 0.05), transparent 32%),
+    #f5f7fb;
 }
 
-.hero {
+.hero-card {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.92));
+  border: 1px solid rgba(37, 99, 235, 0.08);
+}
+
+.section-card {
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.back-button {
+  padding-inline: 0;
+}
+
+.hero-copy {
+  max-width: 720px;
+}
+
+.hero-action-stack {
+  min-width: 280px;
+}
+
+.filter-row {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 24px;
-}
-
-.hero h1 {
-  margin: 10px 0 6px;
-  font-size: 34px;
-}
-
-.subtitle {
-  margin: 0;
-  color: #6b7280;
-}
-
-.hero-actions {
-  display: flex;
-  gap: 10px;
   flex-wrap: wrap;
+  gap: 10px;
 }
 
-.back-btn {
-  border: 0;
-  background: transparent;
-  color: #4f46e5;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 0;
-}
-
-.btn {
-  border: 0;
-  border-radius: 12px;
-  padding: 10px 16px;
-  font-weight: 600;
+.filter-chip {
   cursor: pointer;
 }
 
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-primary {
-  background: #111827;
-  color: white;
-}
-
-.btn-secondary {
-  background: #4f46e5;
-  color: white;
-}
-
-.btn-light {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.btn-open {
-  background: #15803d;
-  color: #ffffff;
-}
-
-.btn-close {
-  background: #d97706;
-  color: #ffffff;
-}
-
-.btn-archive {
-  background: #6b7280;
-  color: #ffffff;
-}
-
-.btn-edit {
-  background: #0f766e;
-  color: #ffffff;
-}
-
-.panel {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 20px;
-  padding: 22px;
-  margin-bottom: 20px;
-}
-
-.class-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.class-header h2 {
-  margin: 0 0 8px;
-}
-
-.status-pill,
-.badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 7px 12px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  background: #e5e7eb;
-  color: #374151;
-  white-space: nowrap;
-}
-
-.status-open {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.status-closed {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.status-archived {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.badge-scheduled {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
-.badge-live {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.badge-ended {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.badge-cancelled {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 18px;
-}
-
-.panel-header h2 {
-  margin: 0;
-}
-
-.count {
-  min-width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: #eef2ff;
-  color: #4338ca;
+.chip-count {
+  margin-left: 8px;
   font-weight: 700;
 }
 
-.classroom-status-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 14px 0 0;
-}
-
-.classroom-status-notice {
-  margin: 16px 0;
-  padding: 14px 16px;
-  border-radius: 14px;
-  border: 1px solid #fde68a;
-  background: #fffbeb;
-  color: #92400e;
-}
-
-.classroom-status-notice strong {
-  display: block;
-  margin-bottom: 6px;
-}
-
-.classroom-status-notice p {
-  margin: 0;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.form-group.full {
-  grid-column: 1 / -1;
-}
-
-.form-group label {
-  font-size: 14px;
-  font-weight: 700;
-  color: #374151;
-}
-
-.form-group input,
-.form-group select,
-.form-group textarea {
-  width: 100%;
-  border: 1px solid #d1d5db;
-  border-radius: 12px;
-  padding: 12px 14px;
-  font: inherit;
-  background: #fff;
-  color: #111827;
-}
-
-.form-message {
-  margin: 16px 0 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  font-weight: 600;
-}
-
-.form-error {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-}
-
-.form-success {
-  background: #ecfdf5;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
-}
-
-.student-callout {
-  margin-top: 18px;
-  border: 1px solid #dbeafe;
-  background: #eff6ff;
-  border-radius: 16px;
-  padding: 16px;
-}
-
-.student-callout strong {
-  display: block;
-  margin-bottom: 6px;
-  color: #1d4ed8;
-}
-
-.student-callout p {
-  margin: 0;
-  color: #374151;
-}
-
-.instructor-callout {
-  border-color: #dcfce7;
-  background: #f0fdf4;
-}
-
-.instructor-callout strong {
-  color: #166534;
-}
-
-.session-summary-strip {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 18px;
-  flex-wrap: wrap;
-}
-
-.summary-mini-card {
-  min-width: 130px;
-  border-radius: 16px;
-  padding: 14px 16px;
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
-}
-
-.summary-mini-card span {
-  display: block;
-  font-size: 12px;
-  color: #6b7280;
-  text-transform: uppercase;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  margin-bottom: 6px;
-}
-
-.summary-mini-card strong {
-  font-size: 24px;
-}
-
-.live-mini {
-  background: #ecfdf5;
-  border-color: #bbf7d0;
-}
-
-.scheduled-mini {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-
-.session-list {
-  display: grid;
-  gap: 16px;
+.summary-box {
+  min-width: 150px;
 }
 
 .session-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 18px;
-  background: #fcfdff;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
 }
 
-.session-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 14px;
-}
-
-.session-top h3 {
-  margin: 0 0 6px;
-}
-
-.session-top p {
-  margin: 0;
-  color: #6b7280;
-}
-
-.session-meta {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.session-meta p,
-.notes {
-  margin: 0;
-  color: #374151;
-}
-
-.session-hint {
-  margin: 12px 0 0;
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.session-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 14px;
-}
-
-.session-panel-header {
-  align-items: flex-start;
-}
-
-.session-panel-subtitle {
-  margin: 6px 0 0;
-  color: #6b7280;
-  font-size: 14px;
-}
-
-.session-filters {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
-}
-
-.filter-btn {
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #374151;
-  border-radius: 999px;
-  padding: 10px 14px;
-  font-weight: 700;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.filter-btn.active {
-  background: #111827;
-  color: #ffffff;
-  border-color: #111827;
-}
-
-.filter-count {
-  display: inline-flex;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.empty-state {
-  padding: 22px;
-  border: 1px dashed #d1d5db;
-  border-radius: 16px;
-  text-align: center;
-  color: #6b7280;
-  background: #fafafa;
-}
-
-.error {
-  color: #b91c1c;
-  border-color: #fecaca;
-  background: #fef2f2;
-}
-
-@media (max-width: 800px) {
-  .page {
-    padding: 20px 14px 32px;
-  }
-
-  .hero,
-  .class-header,
-  .session-top {
-    flex-direction: column;
-  }
-
-  .form-grid,
-  .session-meta {
-    grid-template-columns: 1fr;
-  }
-
-  .session-actions {
+@media (max-width: 960px) {
+  .hero-action-stack {
+    min-width: unset;
+    width: 100%;
     justify-content: stretch;
   }
 
-  .session-actions .btn,
-  .classroom-status-actions .btn,
-  .hero-actions .btn {
-    width: 100%;
+  .hero-action-stack :deep(.v-btn) {
+    flex: 1 1 100%;
   }
 
-  .session-filters {
-  flex-direction: column;
-}
+  .filter-row {
+    flex-direction: column;
+  }
 
-.filter-btn {
-  width: 100%;
-  justify-content: space-between;
-}
+  .filter-chip {
+    justify-content: space-between;
+  }
 }
 </style>
