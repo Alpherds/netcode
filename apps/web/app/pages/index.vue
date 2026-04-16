@@ -76,17 +76,21 @@ const idLabel = computed(() => {
 })
 
 const activeClassesCount = computed(() =>
-  safeClassrooms.value.filter(c => c.class_status === 'OPEN').length
+  safeClassrooms.value.filter((c) => c.class_status === 'OPEN').length
 )
 
 const archivedClassesCount = computed(() =>
-  safeClassrooms.value.filter(c => c.class_status === 'ARCHIVED').length
+  safeClassrooms.value.filter((c) => c.class_status === 'ARCHIVED').length
 )
 
 const showCreateClassroom = ref(false)
 const isCreatingClassroom = ref(false)
 const classroomFormError = ref('')
 const classroomFormSuccess = ref('')
+
+const updatingClassroomId = ref<number | null>(null)
+const classroomStatusError = ref('')
+const classroomStatusSuccess = ref('')
 
 const classroomForm = ref<ClassroomForm>({
   title: '',
@@ -140,18 +144,18 @@ const submitCreateClassroom = async () => {
   isCreatingClassroom.value = true
 
   try {
-   const createClassroomUrl: string = '/api/classrooms'
+    const createClassroomUrl: string = '/api/classrooms'
 
-await $fetch(createClassroomUrl, {
-  method: 'POST',
-  body: {
-    title: classroomForm.value.title,
-    code: classroomForm.value.code,
-    description: classroomForm.value.description,
-    term: classroomForm.value.term,
-    class_status: classroomForm.value.class_status,
-  },
-})
+    await $fetch(createClassroomUrl, {
+      method: 'POST',
+      body: {
+        title: classroomForm.value.title,
+        code: classroomForm.value.code,
+        description: classroomForm.value.description,
+        term: classroomForm.value.term,
+        class_status: classroomForm.value.class_status,
+      },
+    })
 
     classroomFormSuccess.value = 'Classroom created successfully.'
     await refreshClassrooms()
@@ -166,6 +170,40 @@ await $fetch(createClassroomUrl, {
     isCreatingClassroom.value = false
   }
 }
+
+const updateClassroomStatus = async (
+  classroomId: number,
+  nextStatus: 'OPEN' | 'CLOSED' | 'ARCHIVED'
+) => {
+  classroomStatusError.value = ''
+  classroomStatusSuccess.value = ''
+  updatingClassroomId.value = classroomId
+
+  try {
+    const updateStatusUrl: string = `/api/classrooms/${classroomId}/status`
+
+    await $fetch(updateStatusUrl, {
+      method: 'POST',
+      body: {
+        class_status: nextStatus,
+      },
+    })
+
+    classroomStatusSuccess.value = `Classroom marked as ${nextStatus}.`
+    await refreshClassrooms()
+  } catch (error: any) {
+    classroomStatusError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to update classroom status.'
+  } finally {
+    updatingClassroomId.value = null
+  }
+}
+
+const canOpenClassroom = (status?: string | null) => status !== 'OPEN'
+const canCloseClassroom = (status?: string | null) => status === 'OPEN'
+const canArchiveClassroom = (status?: string | null) => status !== 'ARCHIVED'
 
 const doLogout = async () => {
   await logout()
@@ -395,6 +433,14 @@ const openClassroom = async (id: number) => {
           </div>
         </section>
 
+        <p v-if="classroomStatusError" class="form-message form-error">
+          {{ classroomStatusError }}
+        </p>
+
+        <p v-if="classroomStatusSuccess" class="form-message form-success">
+          {{ classroomStatusSuccess }}
+        </p>
+
         <div v-if="classroomsPending" class="empty-state">
           Loading classrooms...
         </div>
@@ -432,6 +478,39 @@ const openClassroom = async (id: number) => {
             <div class="class-meta">
               <span><strong>Term:</strong> {{ classroom.term || '—' }}</span>
               <span><strong>ID:</strong> {{ classroom.id }}</span>
+            </div>
+
+            <div
+              v-if="canCreateClassroom"
+              class="classroom-actions"
+              @click.stop
+            >
+              <button
+                v-if="canOpenClassroom(classroom.class_status)"
+                class="btn btn-open"
+                :disabled="updatingClassroomId === classroom.id"
+                @click="updateClassroomStatus(classroom.id, 'OPEN')"
+              >
+                {{ updatingClassroomId === classroom.id ? 'Updating...' : 'Open' }}
+              </button>
+
+              <button
+                v-if="canCloseClassroom(classroom.class_status)"
+                class="btn btn-close"
+                :disabled="updatingClassroomId === classroom.id"
+                @click="updateClassroomStatus(classroom.id, 'CLOSED')"
+              >
+                {{ updatingClassroomId === classroom.id ? 'Updating...' : 'Close' }}
+              </button>
+
+              <button
+                v-if="canArchiveClassroom(classroom.class_status)"
+                class="btn btn-archive"
+                :disabled="updatingClassroomId === classroom.id"
+                @click="updateClassroomStatus(classroom.id, 'ARCHIVED')"
+              >
+                {{ updatingClassroomId === classroom.id ? 'Updating...' : 'Archive' }}
+              </button>
             </div>
           </article>
         </div>
@@ -505,6 +584,12 @@ const openClassroom = async (id: number) => {
   transform: translateY(-1px);
 }
 
+.btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .btn-primary {
   background: #4f46e5;
   color: #ffffff;
@@ -523,6 +608,21 @@ const openClassroom = async (id: number) => {
 .btn-light {
   background: #e5e7eb;
   color: #111827;
+}
+
+.btn-open {
+  background: #15803d;
+  color: #ffffff;
+}
+
+.btn-close {
+  background: #d97706;
+  color: #ffffff;
+}
+
+.btn-archive {
+  background: #6b7280;
+  color: #ffffff;
 }
 
 .stats-grid {
@@ -801,6 +901,13 @@ const openClassroom = async (id: number) => {
   font-size: 14px;
 }
 
+.classroom-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -883,7 +990,8 @@ const openClassroom = async (id: number) => {
   }
 
   .form-actions .btn,
-  .classes-header-actions .btn {
+  .classes-header-actions .btn,
+  .classroom-actions .btn {
     width: 100%;
   }
 }

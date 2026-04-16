@@ -13,7 +13,7 @@ type Classroom = {
   code?: string | null
   description?: string | null
   term?: string | null
-  class_status?: string | null
+  class_status?: 'OPEN' | 'CLOSED' | 'ARCHIVED' | string | null
 }
 
 type ProfileItem = {
@@ -76,6 +76,18 @@ const canManageEnrollments = computed(
   () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
 )
 
+const canManageClassroomStatus = computed(
+  () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
+)
+
+const classroomStatus = computed(() =>
+  String(classroom.value?.class_status || '').toUpperCase()
+)
+
+const isOpenClassroom = computed(() => classroomStatus.value === 'OPEN')
+const isClosedClassroom = computed(() => classroomStatus.value === 'CLOSED')
+const isArchivedClassroom = computed(() => classroomStatus.value === 'ARCHIVED')
+
 const safeSessions = computed(() => sessions.value ?? [])
 const liveSessions = computed(() =>
   safeSessions.value.filter(
@@ -92,6 +104,10 @@ const showCreateForm = ref(false)
 const isSubmitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
+
+const updatingClassroomStatus = ref(false)
+const classroomStatusError = ref('')
+const classroomStatusSuccess = ref('')
 
 const form = ref<CreateSessionForm>({
   title: '',
@@ -119,7 +135,7 @@ const resetForm = () => {
 }
 
 const toggleCreateForm = () => {
-  if (!isInstructor.value) return
+  if (!isInstructor.value || !isOpenClassroom.value) return
 
   showCreateForm.value = !showCreateForm.value
 
@@ -131,6 +147,11 @@ const toggleCreateForm = () => {
 const submitSession = async () => {
   formError.value = ''
   formSuccess.value = ''
+
+  if (!isOpenClassroom.value) {
+    formError.value = 'You can only create sessions for an OPEN classroom.'
+    return
+  }
 
   if (!form.value.title.trim()) {
     formError.value = 'Session title is required.'
@@ -164,6 +185,40 @@ const submitSession = async () => {
   }
 }
 
+const updateClassroomStatus = async (
+  nextStatus: 'OPEN' | 'CLOSED' | 'ARCHIVED'
+) => {
+  classroomStatusError.value = ''
+  classroomStatusSuccess.value = ''
+  updatingClassroomStatus.value = true
+
+  try {
+    const updateStatusUrl: string = `/api/classrooms/${classroomId}/status`
+
+    await $fetch(updateStatusUrl, {
+      method: 'POST',
+      body: {
+        class_status: nextStatus,
+      },
+    })
+
+    if (nextStatus !== 'OPEN') {
+      showCreateForm.value = false
+      resetForm()
+    }
+
+    classroomStatusSuccess.value = `Classroom marked as ${nextStatus}.`
+    await Promise.all([refreshClassroom(), refreshSessions()])
+  } catch (error: any) {
+    classroomStatusError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to update classroom status.'
+  } finally {
+    updatingClassroomStatus.value = false
+  }
+}
+
 const goBack = async () => {
   await navigateTo('/')
 }
@@ -189,6 +244,19 @@ const badgeClass = (status?: string | null) => {
       return 'badge badge-cancelled'
     default:
       return 'badge'
+  }
+}
+
+const classroomStatusPillClass = (status?: string | null) => {
+  switch (String(status || '').toUpperCase()) {
+    case 'OPEN':
+      return 'status-pill status-open'
+    case 'CLOSED':
+      return 'status-pill status-closed'
+    case 'ARCHIVED':
+      return 'status-pill status-archived'
+    default:
+      return 'status-pill'
   }
 }
 
@@ -266,97 +334,19 @@ const sessionsErrorMessage = computed(() => {
         <button
           v-if="isInstructor"
           class="btn btn-secondary"
+          :disabled="!isOpenClassroom"
           @click="toggleCreateForm"
         >
-          {{ showCreateForm ? 'Close Form' : 'Create Session' }}
+          {{
+            isOpenClassroom
+              ? (showCreateForm ? 'Close Form' : 'Create Session')
+              : 'Classroom Not Open'
+          }}
         </button>
 
         <button class="btn" @click="refreshAll">Refresh</button>
       </div>
     </header>
-
-    <section v-if="showCreateForm && isInstructor" class="panel">
-      <div class="panel-header">
-        <h2>Create Session</h2>
-      </div>
-
-      <div class="form-grid">
-        <div class="form-group full">
-          <label>Session Title</label>
-          <input
-            v-model="form.title"
-            type="text"
-            placeholder="Enter session title"
-          />
-        </div>
-
-        <div class="form-group">
-          <label>Start Date & Time</label>
-          <input v-model="form.starts_at" type="datetime-local" />
-        </div>
-
-        <div class="form-group">
-          <label>End Date & Time</label>
-          <input v-model="form.ends_at" type="datetime-local" />
-        </div>
-
-        <div class="form-group">
-          <label>Room Name</label>
-          <input
-            v-model="form.room_name"
-            type="text"
-            placeholder="Optional room name"
-          />
-        </div>
-
-        <div class="form-group">
-          <label>Meeting Provider</label>
-          <select v-model="form.meeting_provider">
-            <option value="DAILY">DAILY</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label>Meeting Status</label>
-          <select v-model="form.meeting_status">
-            <option value="SCHEDULED">SCHEDULED</option>
-            <option value="LIVE">LIVE</option>
-            <option value="ENDED">ENDED</option>
-            <option value="CANCELLED">CANCELLED</option>
-          </select>
-        </div>
-
-        <div class="form-group full">
-          <label>Notes</label>
-          <textarea
-            v-model="form.notes"
-            rows="4"
-            placeholder="Optional notes"
-          />
-        </div>
-      </div>
-
-      <p v-if="formError" class="form-message form-error">
-        {{ formError }}
-      </p>
-
-      <p v-if="formSuccess" class="form-message form-success">
-        {{ formSuccess }}
-      </p>
-
-      <div class="form-actions">
-        <button class="btn btn-light" :disabled="isSubmitting" @click="resetForm">
-          Reset
-        </button>
-        <button
-          class="btn btn-primary"
-          :disabled="isSubmitting"
-          @click="submitSession"
-        >
-          {{ isSubmitting ? 'Creating...' : 'Save Session' }}
-        </button>
-      </div>
-    </section>
 
     <section v-if="classroomPending" class="panel">
       Loading classroom...
@@ -366,111 +356,263 @@ const sessionsErrorMessage = computed(() => {
       {{ classroomErrorMessage }}
     </section>
 
-    <section v-else class="panel">
-      <div class="class-header">
-        <div>
-          <h2>{{ classroom?.title }}</h2>
-          <p>{{ classroom?.description || 'No description provided.' }}</p>
-        </div>
-        <span class="status-pill">{{ classroom?.class_status || 'UNKNOWN' }}</span>
-      </div>
+    <template v-else>
+      <section class="panel">
+        <div class="class-header">
+          <div>
+            <h2>{{ classroom?.title }}</h2>
+            <p>{{ classroom?.description || 'No description provided.' }}</p>
+          </div>
 
-      <div v-if="isStudent" class="student-callout">
-        <strong>Student View</strong>
-        <p>
-          You can only enter sessions that are currently marked as
-          <strong>LIVE</strong>.
-        </p>
-      </div>
-
-      <div v-else class="student-callout instructor-callout">
-        <strong>Instructor View</strong>
-        <p>
-          Start a session to allow enrolled students to enter the meeting room.
-        </p>
-      </div>
-    </section>
-      
-    <section class="panel">
-      <EnrollmentManager
-  v-if="canManageEnrollments"
-  :classroom-id="classroomId"
-  :can-manage="canManageEnrollments"
-/>
-      <div class="panel-header">
-        <h2>Sessions</h2>
-        <span class="count">{{ safeSessions.length }}</span>
-      </div>
-
-      <div v-if="isStudent" class="session-summary-strip">
-        <div class="summary-mini-card live-mini">
-          <span>Live</span>
-          <strong>{{ liveSessions.length }}</strong>
+          <span :class="classroomStatusPillClass(classroom?.class_status)">
+            {{ classroom?.class_status || 'UNKNOWN' }}
+          </span>
         </div>
 
-        <div class="summary-mini-card scheduled-mini">
-          <span>Scheduled</span>
-          <strong>{{ upcomingSessions.length }}</strong>
-        </div>
-      </div>
-
-      <div v-if="sessionsPending" class="empty-state">
-        Loading sessions...
-      </div>
-
-      <div v-else-if="sessionsError" class="empty-state error">
-        {{ sessionsErrorMessage }}
-      </div>
-
-      <div v-else-if="safeSessions.length === 0" class="empty-state">
-        {{
-          isStudent
-            ? 'No sessions are available for this classroom yet.'
-            : 'No sessions yet. Create the first session to get started.'
-        }}
-      </div>
-
-      <div v-else class="session-list">
-        <article
-          v-for="session in safeSessions"
-          :key="session.id"
-          class="session-card"
+        <div
+          v-if="canManageClassroomStatus"
+          class="classroom-status-actions"
         >
-          <div class="session-top">
-            <div>
-              <h3>{{ session.title || 'Untitled Session' }}</h3>
-              <p>{{ session.room_name || 'No room name' }}</p>
+          <button
+            v-if="!isOpenClassroom"
+            class="btn btn-open"
+            :disabled="updatingClassroomStatus"
+            @click="updateClassroomStatus('OPEN')"
+          >
+            {{ updatingClassroomStatus ? 'Updating...' : 'Open Classroom' }}
+          </button>
+
+          <button
+            v-if="isOpenClassroom"
+            class="btn btn-close"
+            :disabled="updatingClassroomStatus"
+            @click="updateClassroomStatus('CLOSED')"
+          >
+            {{ updatingClassroomStatus ? 'Updating...' : 'Close Classroom' }}
+          </button>
+
+          <button
+            v-if="!isArchivedClassroom"
+            class="btn btn-archive"
+            :disabled="updatingClassroomStatus"
+            @click="updateClassroomStatus('ARCHIVED')"
+          >
+            {{ updatingClassroomStatus ? 'Updating...' : 'Archive Classroom' }}
+          </button>
+        </div>
+
+        <p v-if="classroomStatusError" class="form-message form-error">
+          {{ classroomStatusError }}
+        </p>
+
+        <p v-if="classroomStatusSuccess" class="form-message form-success">
+          {{ classroomStatusSuccess }}
+        </p>
+
+        <div v-if="!isOpenClassroom" class="classroom-status-notice">
+          <strong>
+            {{
+              isArchivedClassroom
+                ? 'This classroom is archived.'
+                : 'This classroom is closed.'
+            }}
+          </strong>
+          <p>
+            New sessions cannot be created unless the classroom is set back to
+            OPEN.
+          </p>
+        </div>
+
+        <div v-if="isStudent" class="student-callout">
+          <strong>Student View</strong>
+          <p>
+            You can only enter sessions that are currently marked as
+            <strong>LIVE</strong>.
+          </p>
+        </div>
+
+        <div v-else class="student-callout instructor-callout">
+          <strong>Instructor View</strong>
+          <p>
+            Start a session to allow enrolled students to enter the meeting room.
+          </p>
+        </div>
+      </section>
+
+      <section
+        v-if="showCreateForm && isInstructor && isOpenClassroom"
+        class="panel"
+      >
+        <div class="panel-header">
+          <h2>Create Session</h2>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Session Title</label>
+            <input
+              v-model="form.title"
+              type="text"
+              placeholder="Enter session title"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Start Date & Time</label>
+            <input v-model="form.starts_at" type="datetime-local" />
+          </div>
+
+          <div class="form-group">
+            <label>End Date & Time</label>
+            <input v-model="form.ends_at" type="datetime-local" />
+          </div>
+
+          <div class="form-group">
+            <label>Room Name</label>
+            <input
+              v-model="form.room_name"
+              type="text"
+              placeholder="Optional room name"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Meeting Provider</label>
+            <select v-model="form.meeting_provider">
+              <option value="DAILY">DAILY</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Meeting Status</label>
+            <select v-model="form.meeting_status">
+              <option value="SCHEDULED">SCHEDULED</option>
+              <option value="LIVE">LIVE</option>
+              <option value="ENDED">ENDED</option>
+              <option value="CANCELLED">CANCELLED</option>
+            </select>
+          </div>
+
+          <div class="form-group full">
+            <label>Notes</label>
+            <textarea
+              v-model="form.notes"
+              rows="4"
+              placeholder="Optional notes"
+            />
+          </div>
+        </div>
+
+        <p v-if="formError" class="form-message form-error">
+          {{ formError }}
+        </p>
+
+        <p v-if="formSuccess" class="form-message form-success">
+          {{ formSuccess }}
+        </p>
+
+        <div class="form-actions">
+          <button
+            class="btn btn-light"
+            :disabled="isSubmitting"
+            @click="resetForm"
+          >
+            Reset
+          </button>
+
+          <button
+            class="btn btn-primary"
+            :disabled="isSubmitting"
+            @click="submitSession"
+          >
+            {{ isSubmitting ? 'Creating...' : 'Save Session' }}
+          </button>
+        </div>
+      </section>
+
+      <section v-if="canManageEnrollments" class="panel">
+        <EnrollmentManager
+          :classroom-id="classroomId"
+          :can-manage="canManageEnrollments"
+        />
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Sessions</h2>
+          <span class="count">{{ safeSessions.length }}</span>
+        </div>
+
+        <div v-if="isStudent" class="session-summary-strip">
+          <div class="summary-mini-card live-mini">
+            <span>Live</span>
+            <strong>{{ liveSessions.length }}</strong>
+          </div>
+
+          <div class="summary-mini-card scheduled-mini">
+            <span>Scheduled</span>
+            <strong>{{ upcomingSessions.length }}</strong>
+          </div>
+        </div>
+
+        <div v-if="sessionsPending" class="empty-state">
+          Loading sessions...
+        </div>
+
+        <div v-else-if="sessionsError" class="empty-state error">
+          {{ sessionsErrorMessage }}
+        </div>
+
+        <div v-else-if="safeSessions.length === 0" class="empty-state">
+          {{
+            isStudent
+              ? 'No sessions are available for this classroom yet.'
+              : 'No sessions yet. Create the first session to get started.'
+          }}
+        </div>
+
+        <div v-else class="session-list">
+          <article
+            v-for="session in safeSessions"
+            :key="session.id"
+            class="session-card"
+          >
+            <div class="session-top">
+              <div>
+                <h3>{{ session.title || 'Untitled Session' }}</h3>
+                <p>{{ session.room_name || 'No room name' }}</p>
+              </div>
+
+              <span :class="badgeClass(session.meeting_status)">
+                {{ statusLabel(session.meeting_status) }}
+              </span>
             </div>
 
-            <span :class="badgeClass(session.meeting_status)">
-              {{ statusLabel(session.meeting_status) }}
-            </span>
-          </div>
+            <div class="session-meta">
+              <p><strong>Start:</strong> {{ formatDateTime(session.starts_at) }}</p>
+              <p><strong>End:</strong> {{ formatDateTime(session.ends_at) }}</p>
+              <p><strong>Provider:</strong> {{ session.meeting_provider || '—' }}</p>
+            </div>
 
-          <div class="session-meta">
-            <p><strong>Start:</strong> {{ formatDateTime(session.starts_at) }}</p>
-            <p><strong>End:</strong> {{ formatDateTime(session.ends_at) }}</p>
-            <p><strong>Provider:</strong> {{ session.meeting_provider || '—' }}</p>
-          </div>
+            <p class="notes">{{ session.notes || 'No notes provided.' }}</p>
+            <p class="session-hint">{{ sessionHint(session.meeting_status) }}</p>
 
-          <p class="notes">{{ session.notes || 'No notes provided.' }}</p>
-          <p class="session-hint">{{ sessionHint(session.meeting_status) }}</p>
-
-          <div class="session-actions">
-            <button
-              class="btn btn-primary"
-              @click="openSession(session.id)"
-            >
-              {{
-                String(session.meeting_status || '').toUpperCase() === 'LIVE'
-                  ? 'Enter Session'
-                  : 'View Session'
-              }}
-            </button>
-          </div>
-        </article>
-      </div>
-    </section>
+            <div class="session-actions">
+              <button
+                class="btn btn-primary"
+                @click="openSession(session.id)"
+              >
+                {{
+                  String(session.meeting_status || '').toUpperCase() === 'LIVE'
+                    ? 'Enter Session'
+                    : 'View Session'
+                }}
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+    </template>
   </div>
 </template>
 
@@ -543,6 +685,21 @@ const sessionsErrorMessage = computed(() => {
   color: #111827;
 }
 
+.btn-open {
+  background: #15803d;
+  color: #ffffff;
+}
+
+.btn-close {
+  background: #d97706;
+  color: #ffffff;
+}
+
+.btn-archive {
+  background: #6b7280;
+  color: #ffffff;
+}
+
 .panel {
   background: white;
   border: 1px solid #e5e7eb;
@@ -574,6 +731,21 @@ const sessionsErrorMessage = computed(() => {
   background: #e5e7eb;
   color: #374151;
   white-space: nowrap;
+}
+
+.status-open {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-closed {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-archived {
+  background: #e5e7eb;
+  color: #374151;
 }
 
 .badge-scheduled {
@@ -617,6 +789,31 @@ const sessionsErrorMessage = computed(() => {
   background: #eef2ff;
   color: #4338ca;
   font-weight: 700;
+}
+
+.classroom-status-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 0;
+}
+
+.classroom-status-notice {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.classroom-status-notice strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.classroom-status-notice p {
+  margin: 0;
 }
 
 .form-grid {
@@ -835,7 +1032,8 @@ const sessionsErrorMessage = computed(() => {
     justify-content: stretch;
   }
 
-  .session-actions .btn {
+  .session-actions .btn,
+  .classroom-status-actions .btn {
     width: 100%;
   }
 }

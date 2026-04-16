@@ -1,30 +1,62 @@
 import { createError, getCookie, getRouterParam, readBody } from 'h3'
 
+type SessionStatus = 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
+
 type CreateSessionBody = {
-  title: string
-  starts_at: string
-  ends_at: string
+  title?: string
+  starts_at?: string
+  ends_at?: string
   room_name?: string
   meeting_provider?: 'DAILY'
-  meeting_status?: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
+  meeting_status?: SessionStatus
   notes?: string
+}
+
+type StrapiCollectionResponse<T> = {
+  data: T[]
+}
+
+type StrapiSingleResponse<T> = {
+  data: T
+}
+
+type StrapiMe = {
+  id: number
+  username: string
+  email?: string
+}
+
+type ProfileRecord = {
+  id: number
+  documentId?: string
+  display_name?: string | null
+  role_label?: string | null
+  auth_user_id?: number | null
+  [key: string]: unknown
+}
+
+type ClassroomRecord = {
+  id: number
+  documentId?: string
+  title?: string | null
+  code?: string | null
+  term?: string | null
+  class_status?: 'OPEN' | 'CLOSED' | 'ARCHIVED' | string | null
+  [key: string]: unknown
 }
 
 type CreatedSession = {
   id: number
   documentId?: string
-  title?: string
-  starts_at?: string
-  ends_at?: string
-  room_name?: string
-  meeting_provider?: string
-  meeting_status?: string
-  notes?: string
+  title?: string | null
+  starts_at?: string | null
+  ends_at?: string | null
+  room_name?: string | null
+  meeting_provider?: string | null
+  meeting_status?: string | null
+  notes?: string | null
+  classroom?: ClassroomRecord | null
   [key: string]: unknown
-}
-
-type StrapiSingleResponse<T> = {
-  data: T
 }
 
 const toIso = (value: string) => {
@@ -84,14 +116,83 @@ export default defineEventHandler(async (event): Promise<CreatedSession> => {
     })
   }
 
+  const allowedStatuses: SessionStatus[] = ['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED']
+  const meetingStatus = body.meeting_status || 'SCHEDULED'
+
+  if (!allowedStatuses.includes(meetingStatus)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Invalid meeting status',
+    })
+  }
+
+  const strapiUrl = String(config.public.strapiUrl || '').replace(/\/$/, '')
+  const headers = {
+    Authorization: `Bearer ${jwt}`,
+  }
+
+  const me = await $fetch<StrapiMe>(`${strapiUrl}/api/users/me`, {
+    headers,
+  })
+
+  const profileResponse = await $fetch<StrapiCollectionResponse<ProfileRecord>>(
+    `${strapiUrl}/api/profiles?filters[auth_user_id][$eq]=${me.id}`,
+    { headers }
+  )
+
+  const profile = profileResponse.data?.[0]
+
+  if (!profile) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Profile not found',
+    })
+  }
+
+  const roleLabel = String(profile.role_label || '').toUpperCase()
+
+  if (roleLabel !== 'INSTRUCTOR' && roleLabel !== 'ADMIN') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'You do not have permission to create a session',
+    })
+  }
+
+  const classroomLookupUrl =
+    roleLabel === 'INSTRUCTOR'
+      ? `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&filters[instructor][id][$eq]=${profile.id}`
+      : `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}`
+
+  const classroomResponse = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
+    classroomLookupUrl,
+    { headers }
+  )
+
+  const classroom = classroomResponse.data?.[0]
+
+  if (!classroom) {
+    throw createError({
+      statusCode: roleLabel === 'INSTRUCTOR' ? 403 : 404,
+      statusMessage:
+        roleLabel === 'INSTRUCTOR'
+          ? 'You do not own this classroom'
+          : 'Classroom not found',
+    })
+  }
+
+  if (String(classroom.class_status || '').toUpperCase() !== 'OPEN') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'You can only create sessions for an OPEN classroom',
+    })
+  }
+
   try {
     const response = await $fetch<StrapiSingleResponse<CreatedSession>>(
-      `${config.public.strapiUrl}/api/class-sessions`,
+      `${strapiUrl}/api/class-sessions`,
       {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${jwt}`,
-        },
+        headers,
         body: {
           data: {
             title: body.title.trim(),
@@ -99,7 +200,7 @@ export default defineEventHandler(async (event): Promise<CreatedSession> => {
             ends_at: endsAtIso,
             room_name: body.room_name?.trim() || `class-${classroomId}-room`,
             meeting_provider: body.meeting_provider || 'DAILY',
-            meeting_status: body.meeting_status || 'SCHEDULED',
+            meeting_status: meetingStatus,
             notes: body.notes?.trim() || '',
             classroom: Number(classroomId),
           },
@@ -112,7 +213,9 @@ export default defineEventHandler(async (event): Promise<CreatedSession> => {
     throw createError({
       statusCode: error?.statusCode || 500,
       statusMessage:
-        error?.data?.error?.message || 'Failed to create session',
+        error?.data?.error?.message ||
+        error?.data?.message ||
+        'Failed to create session',
     })
   }
 })
