@@ -43,6 +43,13 @@ type CreateSessionForm = {
   notes: string
 }
 
+type EditClassroomForm = {
+  title: string
+  code: string
+  description: string
+  term: string
+}
+
 const route = useRoute()
 const classroomId = route.params.id as string
 
@@ -80,6 +87,10 @@ const canManageClassroomStatus = computed(
   () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
 )
 
+const canEditClassroom = computed(
+  () => roleLabel.value === 'INSTRUCTOR' || roleLabel.value === 'ADMIN'
+)
+
 const classroomStatus = computed(() =>
   String(classroom.value?.class_status || '').toUpperCase()
 )
@@ -109,6 +120,11 @@ const updatingClassroomStatus = ref(false)
 const classroomStatusError = ref('')
 const classroomStatusSuccess = ref('')
 
+const showEditClassroomForm = ref(false)
+const isSavingClassroom = ref(false)
+const editClassroomError = ref('')
+const editClassroomSuccess = ref('')
+
 const form = ref<CreateSessionForm>({
   title: '',
   starts_at: '',
@@ -118,6 +134,22 @@ const form = ref<CreateSessionForm>({
   meeting_status: 'SCHEDULED',
   notes: '',
 })
+
+const editClassroomForm = ref<EditClassroomForm>({
+  title: '',
+  code: '',
+  description: '',
+  term: '',
+})
+
+const syncEditClassroomForm = () => {
+  editClassroomForm.value = {
+    title: classroom.value?.title || '',
+    code: classroom.value?.code || '',
+    description: classroom.value?.description || '',
+    term: classroom.value?.term || '',
+  }
+}
 
 const resetForm = () => {
   form.value = {
@@ -141,6 +173,18 @@ const toggleCreateForm = () => {
 
   if (!showCreateForm.value) {
     resetForm()
+  }
+}
+
+const toggleEditClassroomForm = () => {
+  if (!canEditClassroom.value || isArchivedClassroom.value) return
+
+  showEditClassroomForm.value = !showEditClassroomForm.value
+  editClassroomError.value = ''
+  editClassroomSuccess.value = ''
+
+  if (showEditClassroomForm.value) {
+    syncEditClassroomForm()
   }
 }
 
@@ -185,6 +229,54 @@ const submitSession = async () => {
   }
 }
 
+const submitEditClassroom = async () => {
+  editClassroomError.value = ''
+  editClassroomSuccess.value = ''
+
+  if (!editClassroomForm.value.title.trim()) {
+    editClassroomError.value = 'Classroom title is required.'
+    return
+  }
+
+  if (!editClassroomForm.value.code.trim()) {
+    editClassroomError.value = 'Classroom code is required.'
+    return
+  }
+
+  if (!editClassroomForm.value.term.trim()) {
+    editClassroomError.value = 'Term is required.'
+    return
+  }
+
+  isSavingClassroom.value = true
+
+  try {
+    const updateClassroomUrl: string = `/api/classrooms/${classroomId}`
+
+    const updated = await $fetch<Classroom>(updateClassroomUrl, {
+      method: 'PUT',
+      body: {
+        title: editClassroomForm.value.title,
+        code: editClassroomForm.value.code,
+        description: editClassroomForm.value.description,
+        term: editClassroomForm.value.term,
+      },
+    })
+
+    classroom.value = updated
+    editClassroomSuccess.value = 'Classroom updated successfully.'
+    showEditClassroomForm.value = false
+    await refreshClassroom()
+  } catch (error: any) {
+    editClassroomError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to update classroom.'
+  } finally {
+    isSavingClassroom.value = false
+  }
+}
+
 const updateClassroomStatus = async (
   nextStatus: 'OPEN' | 'CLOSED' | 'ARCHIVED'
 ) => {
@@ -205,6 +297,10 @@ const updateClassroomStatus = async (
     if (nextStatus !== 'OPEN') {
       showCreateForm.value = false
       resetForm()
+    }
+
+    if (nextStatus === 'ARCHIVED') {
+      showEditClassroomForm.value = false
     }
 
     classroomStatusSuccess.value = `Classroom marked as ${nextStatus}.`
@@ -344,6 +440,19 @@ const sessionsErrorMessage = computed(() => {
           }}
         </button>
 
+        <button
+          v-if="canEditClassroom"
+          class="btn btn-edit"
+          :disabled="isArchivedClassroom"
+          @click="toggleEditClassroomForm"
+        >
+          {{
+            isArchivedClassroom
+              ? 'Archived Classroom'
+              : (showEditClassroomForm ? 'Close Edit' : 'Edit Classroom')
+          }}
+        </button>
+
         <button class="btn" @click="refreshAll">Refresh</button>
       </div>
     </header>
@@ -436,6 +545,79 @@ const sessionsErrorMessage = computed(() => {
           <p>
             Start a session to allow enrolled students to enter the meeting room.
           </p>
+        </div>
+      </section>
+
+      <section
+        v-if="showEditClassroomForm && canEditClassroom && !isArchivedClassroom"
+        class="panel"
+      >
+        <div class="panel-header">
+          <h2>Edit Classroom</h2>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Title</label>
+            <input
+              v-model="editClassroomForm.title"
+              type="text"
+              placeholder="Enter classroom title"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Code</label>
+            <input
+              v-model="editClassroomForm.code"
+              type="text"
+              placeholder="Enter classroom code"
+            />
+          </div>
+
+          <div class="form-group full">
+            <label>Description</label>
+            <textarea
+              v-model="editClassroomForm.description"
+              rows="4"
+              placeholder="Enter classroom description"
+            />
+          </div>
+
+          <div class="form-group">
+            <label>Term</label>
+            <input
+              v-model="editClassroomForm.term"
+              type="text"
+              placeholder="e.g. 1st Semester AY 2026-2027"
+            />
+          </div>
+        </div>
+
+        <p v-if="editClassroomError" class="form-message form-error">
+          {{ editClassroomError }}
+        </p>
+
+        <p v-if="editClassroomSuccess" class="form-message form-success">
+          {{ editClassroomSuccess }}
+        </p>
+
+        <div class="form-actions">
+          <button
+            class="btn btn-light"
+            :disabled="isSavingClassroom"
+            @click="syncEditClassroomForm"
+          >
+            Reset
+          </button>
+
+          <button
+            class="btn btn-primary"
+            :disabled="isSavingClassroom"
+            @click="submitEditClassroom"
+          >
+            {{ isSavingClassroom ? 'Saving...' : 'Save Changes' }}
+          </button>
         </div>
       </section>
 
@@ -697,6 +879,11 @@ const sessionsErrorMessage = computed(() => {
 
 .btn-archive {
   background: #6b7280;
+  color: #ffffff;
+}
+
+.btn-edit {
+  background: #0f766e;
   color: #ffffff;
 }
 
@@ -1033,7 +1220,8 @@ const sessionsErrorMessage = computed(() => {
   }
 
   .session-actions .btn,
-  .classroom-status-actions .btn {
+  .classroom-status-actions .btn,
+  .hero-actions .btn {
     width: 100%;
   }
 }
