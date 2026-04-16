@@ -1,6 +1,7 @@
 import { createError, getCookie, getRouterParam, readBody } from 'h3'
 
 type SessionStatus = 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
+type ClassroomStatus = 'OPEN' | 'CLOSED' | 'ARCHIVED'
 
 type StatusBody = {
   meeting_status: SessionStatus
@@ -34,12 +35,14 @@ type ClassroomRef = {
   title?: string | null
   code?: string | null
   term?: string | null
+  class_status?: ClassroomStatus | null
   [key: string]: unknown
 }
 
 type ClassroomRecord = {
   id: number
   documentId?: string
+  class_status?: ClassroomStatus | null
   instructor?: ProfileRecord | null
   [key: string]: unknown
 }
@@ -149,18 +152,45 @@ export default defineEventHandler(async (event): Promise<SessionRecord> => {
     })
   }
 
+  let classroom: ClassroomRecord | null = null
+
   if (roleLabel === 'INSTRUCTOR') {
     const classroomResponse = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
       `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&filters[instructor][id][$eq]=${profile.id}&populate=instructor`,
       { headers }
     )
 
-    if (!classroomResponse.data?.[0]) {
+    classroom = classroomResponse.data?.[0] || null
+
+    if (!classroom) {
       throw createError({
         statusCode: 403,
         statusMessage: 'You do not own this classroom session',
       })
     }
+  } else {
+    const classroomResponse = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
+      `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&populate=instructor`,
+      { headers }
+    )
+
+    classroom = classroomResponse.data?.[0] || null
+
+    if (!classroom) {
+      throw createError({
+        statusCode: 404,
+        statusMessage: 'Classroom not found',
+      })
+    }
+  }
+
+  const classroomStatus = String(classroom.class_status || '').toUpperCase()
+
+  if (body.meeting_status === 'LIVE' && classroomStatus !== 'OPEN') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'You can only start a session when the classroom is OPEN',
+    })
   }
 
   await $fetch<StrapiSingleResponse<SessionRecord>>(

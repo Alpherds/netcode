@@ -43,6 +43,8 @@ type CreateSessionForm = {
   notes: string
 }
 
+type SessionFilter = 'ALL' | 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
+
 type EditClassroomForm = {
   title: string
   code: string
@@ -110,6 +112,52 @@ const upcomingSessions = computed(() =>
     (item) => String(item.meeting_status || '').toUpperCase() === 'SCHEDULED'
   )
 )
+
+const currentSessionFilter = ref<SessionFilter>('ALL')
+
+const scheduledSessionsCount = computed(() =>
+  safeSessions.value.filter(
+    (item) => String(item.meeting_status || '').toUpperCase() === 'SCHEDULED'
+  ).length
+)
+
+const endedSessionsCount = computed(() =>
+  safeSessions.value.filter(
+    (item) => String(item.meeting_status || '').toUpperCase() === 'ENDED'
+  ).length
+)
+
+const cancelledSessionsCount = computed(() =>
+  safeSessions.value.filter(
+    (item) => String(item.meeting_status || '').toUpperCase() === 'CANCELLED'
+  ).length
+)
+
+const filteredSessions = computed(() => {
+  if (currentSessionFilter.value === 'ALL') {
+    return safeSessions.value
+  }
+
+  return safeSessions.value.filter(
+    (item) =>
+      String(item.meeting_status || '').toUpperCase() === currentSessionFilter.value
+  )
+})
+
+const sessionFilterLabel = computed(() => {
+  switch (currentSessionFilter.value) {
+    case 'SCHEDULED':
+      return 'scheduled'
+    case 'LIVE':
+      return 'live'
+    case 'ENDED':
+      return 'ended'
+    case 'CANCELLED':
+      return 'cancelled'
+    default:
+      return 'all'
+  }
+})
 
 const showCreateForm = ref(false)
 const isSubmitting = ref(false)
@@ -729,10 +777,63 @@ const sessionsErrorMessage = computed(() => {
 </section>
 
       <section class="panel">
-        <div class="panel-header">
-          <h2>Sessions</h2>
-          <span class="count">{{ safeSessions.length }}</span>
-        </div>
+<div class="panel-header session-panel-header">
+  <div>
+    <h2>Sessions</h2>
+    <p class="session-panel-subtitle">
+      Showing {{ filteredSessions.length }} of {{ safeSessions.length }} sessions
+    </p>
+  </div>
+
+  <span class="count">{{ filteredSessions.length }}</span>
+</div>
+
+<div class="session-filters">
+  <button
+    class="filter-btn"
+    :class="{ active: currentSessionFilter === 'ALL' }"
+    @click="currentSessionFilter = 'ALL'"
+  >
+    All
+    <span class="filter-count">{{ safeSessions.length }}</span>
+  </button>
+
+  <button
+    class="filter-btn"
+    :class="{ active: currentSessionFilter === 'SCHEDULED' }"
+    @click="currentSessionFilter = 'SCHEDULED'"
+  >
+    Scheduled
+    <span class="filter-count">{{ scheduledSessionsCount }}</span>
+  </button>
+
+  <button
+    class="filter-btn"
+    :class="{ active: currentSessionFilter === 'LIVE' }"
+    @click="currentSessionFilter = 'LIVE'"
+  >
+    Live
+    <span class="filter-count">{{ liveSessions.length }}</span>
+  </button>
+
+  <button
+    class="filter-btn"
+    :class="{ active: currentSessionFilter === 'ENDED' }"
+    @click="currentSessionFilter = 'ENDED'"
+  >
+    Ended
+    <span class="filter-count">{{ endedSessionsCount }}</span>
+  </button>
+
+  <button
+    class="filter-btn"
+    :class="{ active: currentSessionFilter === 'CANCELLED' }"
+    @click="currentSessionFilter = 'CANCELLED'"
+  >
+    Cancelled
+    <span class="filter-count">{{ cancelledSessionsCount }}</span>
+  </button>
+</div>
 
         <div v-if="isStudent" class="session-summary-strip">
           <div class="summary-mini-card live-mini">
@@ -754,20 +855,24 @@ const sessionsErrorMessage = computed(() => {
           {{ sessionsErrorMessage }}
         </div>
 
-        <div v-else-if="safeSessions.length === 0" class="empty-state">
-          {{
-            isStudent
-              ? 'No sessions are available for this classroom yet.'
-              : 'No sessions yet. Create the first session to get started.'
-          }}
-        </div>
+<div v-else-if="safeSessions.length === 0" class="empty-state">
+  {{
+    isStudent
+      ? 'No sessions are available for this classroom yet.'
+      : 'No sessions yet. Create the first session to get started.'
+  }}
+</div>
+
+<div v-else-if="filteredSessions.length === 0" class="empty-state">
+  No {{ sessionFilterLabel }} sessions found for this classroom.
+</div>
 
         <div v-else class="session-list">
-          <article
-            v-for="session in safeSessions"
-            :key="session.id"
-            class="session-card"
-          >
+<article
+  v-for="session in filteredSessions"
+  :key="session.id"
+  class="session-card"
+>
             <div class="session-top">
               <div>
                 <h3>{{ session.title || 'Untitled Session' }}</h3>
@@ -1193,6 +1298,53 @@ const sessionsErrorMessage = computed(() => {
   margin-top: 14px;
 }
 
+.session-panel-header {
+  align-items: flex-start;
+}
+
+.session-panel-subtitle {
+  margin: 6px 0 0;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.session-filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.filter-btn {
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-btn.active {
+  background: #111827;
+  color: #ffffff;
+  border-color: #111827;
+}
+
+.filter-count {
+  display: inline-flex;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .empty-state {
   padding: 22px;
   border: 1px dashed #d1d5db;
@@ -1233,5 +1385,14 @@ const sessionsErrorMessage = computed(() => {
   .hero-actions .btn {
     width: 100%;
   }
+
+  .session-filters {
+  flex-direction: column;
+}
+
+.filter-btn {
+  width: 100%;
+  justify-content: space-between;
+}
 }
 </style>
