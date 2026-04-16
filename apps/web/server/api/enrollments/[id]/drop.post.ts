@@ -17,6 +17,7 @@ type ProfileRecord = {
 
 type ClassroomRecord = {
   id: number
+  class_status?: 'OPEN' | 'CLOSED' | 'ARCHIVED' | string | null
   [key: string]: unknown
 }
 
@@ -32,8 +33,19 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
   const jwt = getCookie(event, 'netcode_jwt')
   const enrollmentId = getRouterParam(event, 'id')
 
-  if (!jwt) throw createError({ statusCode: 401, statusMessage: 'Unauthorized' })
-  if (!enrollmentId) throw createError({ statusCode: 400, statusMessage: 'Enrollment id is required' })
+  if (!jwt) {
+    throw createError({
+      statusCode: 401,
+      statusMessage: 'Unauthorized',
+    })
+  }
+
+  if (!enrollmentId) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'Enrollment id is required',
+    })
+  }
 
   const strapiUrl = String(config.public.strapiUrl || '').replace(/\/$/, '')
   const headers = { Authorization: `Bearer ${jwt}` }
@@ -46,11 +58,21 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
   )
 
   const profile = profileRes.data?.[0]
-  if (!profile) throw createError({ statusCode: 404, statusMessage: 'Profile not found' })
+
+  if (!profile) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Profile not found',
+    })
+  }
 
   const role = String(profile.role_label || '').toUpperCase()
+
   if (role !== 'ADMIN' && role !== 'INSTRUCTOR') {
-    throw createError({ statusCode: 403, statusMessage: 'You do not have access to drop enrollments' })
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'You do not have access to drop enrollments',
+    })
   }
 
   const enrollmentRes = await $fetch<StrapiCollectionResponse<EnrollmentRecord>>(
@@ -62,7 +84,10 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
   const classroomId = enrollment?.classroom?.id
 
   if (!enrollment?.documentId || !classroomId) {
-    throw createError({ statusCode: 404, statusMessage: 'Enrollment not found' })
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Enrollment not found',
+    })
   }
 
   if (role === 'INSTRUCTOR') {
@@ -72,8 +97,18 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
     )
 
     if (!classroomRes.data?.[0]) {
-      throw createError({ statusCode: 403, statusMessage: 'You do not own this classroom' })
+      throw createError({
+        statusCode: 403,
+        statusMessage: 'You do not own this classroom',
+      })
     }
+  }
+
+  if (String(enrollment.classroom?.class_status || '').toUpperCase() === 'ARCHIVED') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Enrollment changes are disabled for archived classrooms',
+    })
   }
 
   const updated = await $fetch<StrapiSingleResponse<EnrollmentRecord>>(

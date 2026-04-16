@@ -1,9 +1,9 @@
 import { createError, getCookie } from 'h3'
 
-type SessionUser = {
+type StrapiMe = {
   id: number
   username: string
-  email: string
+  email?: string
 }
 
 type ProfileRecord = {
@@ -21,25 +21,27 @@ type StrapiCollectionResponse<T> = {
 export default defineEventHandler(async (event): Promise<ProfileRecord | null> => {
   const config = useRuntimeConfig(event)
   const jwt = getCookie(event, 'netcode_jwt')
-  const rawUser = getCookie(event, 'netcode_user')
 
-  if (!jwt || !rawUser) {
+  if (!jwt) {
     throw createError({
       statusCode: 401,
       statusMessage: 'Unauthorized',
     })
   }
 
-  const user = JSON.parse(decodeURIComponent(rawUser)) as SessionUser
+  const strapiUrl = String(config.public.strapiUrl || '').replace(/\/$/, '')
+  const headers = {
+    Authorization: `Bearer ${jwt}`,
+  }
+
+  const me = await $fetch<StrapiMe>(`${strapiUrl}/api/users/me`, {
+    headers,
+  })
 
   const response = await $fetch<StrapiCollectionResponse<ProfileRecord>>(
-    `${config.public.strapiUrl}/api/profiles?filters[auth_user_id][$eq]=${user.id}`,
-    {
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-      },
-    }
+    `${strapiUrl}/api/profiles?filters[auth_user_id][$eq]=${me.id}`,
+    { headers }
   )
 
-  return response.data[0] ?? null
+  return response.data?.[0] ?? null
 })

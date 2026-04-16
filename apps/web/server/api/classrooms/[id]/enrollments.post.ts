@@ -17,6 +17,8 @@ type ProfileRecord = {
 
 type ClassroomRecord = {
   id: number
+  documentId?: string
+  class_status?: 'OPEN' | 'CLOSED' | 'ARCHIVED' | string | null
   [key: string]: unknown
 }
 
@@ -88,18 +90,33 @@ export default defineEventHandler(async (event): Promise<EnrollmentRecord> => {
     })
   }
 
-  if (role === 'INSTRUCTOR') {
-    const classroomRes = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
-      `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&filters[instructor][id][$eq]=${profile.id}`,
-      { headers }
-    )
+  const classroomLookupUrl =
+    role === 'INSTRUCTOR'
+      ? `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}&filters[instructor][id][$eq]=${profile.id}`
+      : `${strapiUrl}/api/classrooms?filters[id][$eq]=${classroomId}`
 
-    if (!classroomRes.data?.[0]) {
-      throw createError({
-        statusCode: 403,
-        statusMessage: 'You do not own this classroom',
-      })
-    }
+  const classroomRes = await $fetch<StrapiCollectionResponse<ClassroomRecord>>(
+    classroomLookupUrl,
+    { headers }
+  )
+
+  const classroom = classroomRes.data?.[0]
+
+  if (!classroom) {
+    throw createError({
+      statusCode: role === 'INSTRUCTOR' ? 403 : 404,
+      statusMessage:
+        role === 'INSTRUCTOR'
+          ? 'You do not own this classroom'
+          : 'Classroom not found',
+    })
+  }
+
+  if (String(classroom.class_status || '').toUpperCase() === 'ARCHIVED') {
+    throw createError({
+      statusCode: 403,
+      statusMessage: 'Enrollment changes are disabled for archived classrooms',
+    })
   }
 
   const existingRes = await $fetch<StrapiCollectionResponse<EnrollmentRecord>>(

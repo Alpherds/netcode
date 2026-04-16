@@ -712,12 +712,21 @@ const sessionsErrorMessage = computed(() => {
         </div>
       </section>
 
-      <section v-if="canManageEnrollments" class="panel">
-        <EnrollmentManager
-          :classroom-id="classroomId"
-          :can-manage="canManageEnrollments"
-        />
-      </section>
+<section v-if="canManageEnrollments && !isArchivedClassroom" class="panel">
+  <EnrollmentManager
+    :classroom-id="classroomId"
+    :can-manage="canManageEnrollments"
+  />
+</section>
+
+<section
+  v-else-if="canManageEnrollments && isArchivedClassroom"
+  class="panel"
+>
+  <div class="empty-state">
+    Enrollment management is disabled for archived classrooms.
+  </div>
+</section>
 
       <section class="panel">
         <div class="panel-header">
