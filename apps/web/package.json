@@ -24,5 +24,8 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0"
-  }
+  },
+  "optionalDependencies": {
+  "@oxc-parser/binding-linux-x64-gnu": "0.128.0"
+}
 }
