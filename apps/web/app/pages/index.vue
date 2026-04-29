@@ -254,6 +254,10 @@ const goToClassroom = async (id: number) => {
   await navigateTo(`/classes/${id}`)
 }
 
+const goToCodeLab = async () => {
+  await navigateTo('/code-lab')
+}
+
 const { logout } = useAuth()
 
 const handleLogout = async () => {
@@ -736,15 +740,26 @@ const classroomStatusLabel = (status?: string | null) => {
 
                       <div>
                         <div class="text-h6 font-weight-bold">Code Lab</div>
-                        <div class="text-medium-emphasis">Coming soon</div>
+                        <div class="text-medium-emphasis">C++, Java, Python</div>
                       </div>
                     </div>
 
-                    <v-chip size="small" variant="outlined">Program</v-chip>
+                    <v-chip size="small" variant="outlined">Available</v-chip>
                   </div>
 
-                  <div class="text-medium-emphasis mt-6">
-                    Interactive coding workspace.
+                  <div class="text-medium-emphasis mt-6 mb-4">
+                    Run and test code in a guided lab environment using multiple programming languages.
+                  </div>
+
+                  <div class="d-flex">
+                    <v-btn
+                      color="primary"
+                      rounded="pill"
+                      prepend-icon="mdi-open-in-new"
+                      @click="goToCodeLab"
+                    >
+                      Open Code Lab
+                    </v-btn>
                   </div>
                 </v-card-text>
               </v-card>

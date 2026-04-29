@@ -9,5 +9,8 @@
     "dev:cms": "npm --workspace apps/cms run develop",
     "build:web": "npm --workspace apps/web run build",
     "build:cms": "npm --workspace apps/cms run build"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.55.1"
   }
 }

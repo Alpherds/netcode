@@ -15,6 +15,11 @@ export default defineNuxtConfig({
       process.env.NUXT_DAILY_ROOM_PREFIX ||
       process.env.DAILY_ROOM_PREFIX ||
       'netcode-session-',
+
+  JUDGE0_URL: process.env.JUDGE0_URL || '',
+  JUDGE0_AUTH_TOKEN: process.env.JUDGE0_AUTH_TOKEN || '',
+  JUDGE0_AUTH_HEADER: process.env.JUDGE0_AUTH_HEADER || 'X-Auth-Token',
+
     public: {
       strapiUrl: process.env.NUXT_PUBLIC_STRAPI_URL || '',
     },
