@@ -1,0 +1,67 @@
+{
+  "kind": "collectionType",
+  "collectionName": "code_projects",
+  "info": {
+    "singularName": "code-project",
+    "pluralName": "code-projects",
+    "displayName": "Code Project",
+    "description": "Saved code drafts and results for the code lab"
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "language": {
+      "type": "enumeration",
+      "enum": ["cpp", "java", "python"],
+      "required": true
+    },
+    "sourceCode": {
+      "type": "text",
+      "required": true
+    },
+    "stdin": {
+      "type": "text"
+    },
+    "latestStdout": {
+      "type": "text"
+    },
+    "latestStderr": {
+      "type": "text"
+    },
+    "latestCompileOutput": {
+      "type": "text"
+    },
+    "latestMessage": {
+      "type": "text"
+    },
+    "latestStatus": {
+      "type": "string"
+    },
+    "latestTime": {
+      "type": "string"
+    },
+    "latestMemory": {
+      "type": "integer"
+    },
+    "latestExitCode": {
+      "type": "integer"
+    },
+    "isSubmitted": {
+      "type": "boolean",
+      "default": false
+    },
+    "exerciseKey": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

@@ -542,6 +542,53 @@ export interface ApiClassroomClassroom extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiCodeProjectCodeProject extends Struct.CollectionTypeSchema {
+  collectionName: 'code_projects';
+  info: {
+    description: 'Saved code drafts and results for the code lab';
+    displayName: 'Code Project';
+    pluralName: 'code-projects';
+    singularName: 'code-project';
+  };
+  options: {
+    draftAndPublish: false;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    exerciseKey: Schema.Attribute.String;
+    isSubmitted: Schema.Attribute.Boolean & Schema.Attribute.DefaultTo<false>;
+    language: Schema.Attribute.Enumeration<['cpp', 'java', 'python']> &
+      Schema.Attribute.Required;
+    latestCompileOutput: Schema.Attribute.Text;
+    latestExitCode: Schema.Attribute.Integer;
+    latestMemory: Schema.Attribute.Integer;
+    latestMessage: Schema.Attribute.Text;
+    latestStatus: Schema.Attribute.String;
+    latestStderr: Schema.Attribute.Text;
+    latestStdout: Schema.Attribute.Text;
+    latestTime: Schema.Attribute.String;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::code-project.code-project'
+    > &
+      Schema.Attribute.Private;
+    owner: Schema.Attribute.Relation<
+      'manyToOne',
+      'plugin::users-permissions.user'
+    >;
+    publishedAt: Schema.Attribute.DateTime;
+    sourceCode: Schema.Attribute.Text & Schema.Attribute.Required;
+    stdin: Schema.Attribute.Text;
+    title: Schema.Attribute.String & Schema.Attribute.Required;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiEnrollmentEnrollment extends Struct.CollectionTypeSchema {
   collectionName: 'enrollments';
   info: {
@@ -1128,6 +1175,7 @@ declare module '@strapi/strapi' {
       'api::attendance.attendance': ApiAttendanceAttendance;
       'api::class-session.class-session': ApiClassSessionClassSession;
       'api::classroom.classroom': ApiClassroomClassroom;
+      'api::code-project.code-project': ApiCodeProjectCodeProject;
       'api::enrollment.enrollment': ApiEnrollmentEnrollment;
       'api::profile.profile': ApiProfileProfile;
       'plugin::content-releases.release': PluginContentReleasesRelease;
