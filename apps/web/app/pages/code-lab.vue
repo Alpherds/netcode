@@ -48,6 +48,8 @@ const isRunning = ref(false)
 const runResult = ref<RunResponse | null>(null)
 const runError = ref('')
 
+const autosaveRunLoading = ref(false)
+
 const codeProjectsApi = useCodeProjects()
 
 const projectTitle = ref('Untitled Code')
@@ -166,7 +168,9 @@ async function runCode() {
       },
     })
 
-    runResult.value = response
+runResult.value = response
+
+await autosaveCurrentRunResult()
   } catch (error: any) {
     runError.value =
       error?.data?.message ||
@@ -264,6 +268,37 @@ async function saveProject() {
 )
   } finally {
     saveLoading.value = false
+  }
+}
+
+async function autosaveCurrentRunResult() {
+  if (!currentProjectDocumentId.value) return
+
+  try {
+    autosaveRunLoading.value = true
+
+    const payload = buildProjectPayload()
+    const response = await codeProjectsApi.update(
+      currentProjectDocumentId.value,
+      payload
+    )
+
+    projectTitle.value = response.item.title
+
+    savedProjects.value = savedProjects.value.map((item: CodeProjectDto) =>
+      item.documentId === response.item.documentId ? response.item : item
+    )
+  } catch (error: any) {
+    console.error('autosaveCurrentRunResult error:', error)
+
+    showFeedback(
+      error?.data?.message ||
+        error?.message ||
+        'Run finished, but autosaving the result failed.',
+      'warning'
+    )
+  } finally {
+    autosaveRunLoading.value = false
   }
 }
 

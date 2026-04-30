@@ -721,7 +721,7 @@ const classroomStatusLabel = (status?: string | null) => {
           <v-card-text class="pa-5">
             <div class="text-h5 font-weight-bold mb-1">Learning Tools</div>
             <div class="text-medium-emphasis mb-4">
-              UI placeholders for the next modules.
+            Online IDE and Simulation.
             </div>
 
             <div class="d-flex flex-column ga-4">
