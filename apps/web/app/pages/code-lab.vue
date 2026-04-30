@@ -1,7 +1,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { definePageMeta, navigateTo, useFetch } from '#imports'
+import { definePageMeta, navigateTo, useFetch, useCookie } from '#imports'
 import MonacoCodeEditor from '~/components/code-lab/MonacoCodeEditor.client.vue'
 import { useCodeProjects } from '~/composables/useCodeProjects'
 import type { CodeProjectDto, SaveCodeProjectInput } from '~/types/code-project'
@@ -164,26 +164,13 @@ async function runCode() {
 }
 
 function getJwtToken() {
-  if (!import.meta.client) {
-    throw new Error('Token lookup is only available on client side.')
+  const token = useCookie<string | null>('netcode_jwt').value || ''
+
+  if (!token) {
+    throw new Error('Missing login token.')
   }
 
-  const possibleKeys = [
-    'strapi_jwt',
-    'jwt',
-    'token',
-    'auth_token',
-    'netcode_token',
-  ]
-
-  for (const key of possibleKeys) {
-    const value = localStorage.getItem(key)
-    if (value) return value
-  }
-
-  throw new Error(
-    'Missing login token. Replace getJwtToken() with your real auth token source.'
-  )
+  return token
 }
 
 function buildProjectPayload(): SaveCodeProjectInput {
@@ -231,8 +218,13 @@ async function fetchSavedProjects() {
 }
 
 async function openSavedProjects() {
-  await fetchSavedProjects()
   savedProjectsDialog.value = true
+
+  try {
+    await fetchSavedProjects()
+  } catch (error) {
+    console.error('openSavedProjects error:', error)
+  }
 }
 
 async function saveProject() {
