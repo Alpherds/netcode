@@ -66,6 +66,19 @@ const selectedLanguage = computed(() => {
   ) || null
 })
 
+const feedbackOpen = ref(false)
+const feedbackMessage = ref('')
+const feedbackColor = ref<'success' | 'error' | 'warning' | 'info'>('success')
+
+function showFeedback(
+  message: string,
+  color: 'success' | 'error' | 'warning' | 'info' = 'success'
+) {
+  feedbackMessage.value = message
+  feedbackColor.value = color
+  feedbackOpen.value = true
+}
+
 watch(
   safeLanguages,
   (items) => {
@@ -205,7 +218,10 @@ async function fetchSavedProjects() {
     savedProjects.value = response.items
   } catch (error: any) {
     console.error('fetchSavedProjects error:', error)
-    alert(error?.data?.message || error?.message || 'Failed to load saved projects.')
+   showFeedback(
+  error?.data?.message || error?.message || 'Failed to load saved projects.',
+  'error'
+)
   } finally {
     savedProjectsLoading.value = false
   }
@@ -239,10 +255,13 @@ async function saveProject() {
     }
 
     await fetchSavedProjects()
-    alert('Code project saved successfully.')
+    showFeedback('Code project saved successfully.', 'success')
   } catch (error: any) {
     console.error('saveProject error:', error)
-    alert(error?.data?.message || error?.message || 'Failed to save project.')
+    showFeedback(
+  error?.data?.message || error?.message || 'Failed to save project.',
+  'error'
+)
   } finally {
     saveLoading.value = false
   }
@@ -283,10 +302,13 @@ async function deleteProjectFromList(item: CodeProjectDto) {
       createNewProject()
     }
 
-    alert('Code project deleted.')
+showFeedback('Code project deleted.', 'success')
   } catch (error: any) {
     console.error('deleteProjectFromList error:', error)
-    alert(error?.data?.message || error?.message || 'Failed to delete project.')
+   showFeedback(
+  error?.data?.message || error?.message || 'Failed to delete project.',
+  'error'
+)
   } finally {
     deleteLoading.value = false
   }
@@ -294,7 +316,7 @@ async function deleteProjectFromList(item: CodeProjectDto) {
 
 async function deleteCurrentProject() {
   if (!currentProjectDocumentId.value) {
-    alert('No saved project selected.')
+    showFeedback('No saved project selected.', 'warning')
     return
   }
 
@@ -316,10 +338,13 @@ async function deleteCurrentProject() {
     )
 
     createNewProject()
-    alert('Code project deleted.')
+    showFeedback('Code project deleted.', 'success')
   } catch (error: any) {
     console.error('deleteCurrentProject error:', error)
-    alert(error?.data?.message || error?.message || 'Failed to delete project.')
+   showFeedback(
+  error?.data?.message || error?.message || 'Failed to delete project.',
+  'error'
+)
   } finally {
     deleteLoading.value = false
   }
@@ -713,6 +738,26 @@ async function deleteCurrentProject() {
     </v-card-actions>
   </v-card>
 </v-dialog>
+
+<v-snackbar
+  v-model="feedbackOpen"
+  :color="feedbackColor"
+  timeout="2500"
+  location="top right"
+  rounded="pill"
+>
+  {{ feedbackMessage }}
+
+  <template #actions>
+    <v-btn
+      variant="text"
+      color="white"
+      @click="feedbackOpen = false"
+    >
+      Close
+    </v-btn>
+  </template>
+</v-snackbar>
 
   </v-container>
 </template>
