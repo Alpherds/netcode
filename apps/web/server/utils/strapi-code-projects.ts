@@ -1,4 +1,4 @@
-import { createError, getHeader, type H3Event } from 'h3'
+import { createError, getCookie, getHeader, type H3Event } from 'h3'
 import type { CodeProjectDto } from '../../app/types/code-project'
 
 type StrapiUser = {
@@ -55,23 +55,22 @@ function getStrapiApiToken() {
 export function getBearerToken(event: H3Event) {
   const authHeader = getHeader(event, 'authorization') || ''
 
-  if (!authHeader.toLowerCase().startsWith('bearer ')) {
-    throw createError({
-      statusCode: 401,
-      statusMessage: 'Missing authorization token',
-    })
+  if (authHeader.toLowerCase().startsWith('bearer ')) {
+    const token = authHeader.slice(7).trim()
+
+    if (token) return token
   }
 
-  const token = authHeader.slice(7).trim()
+  const cookieToken = getCookie(event, 'netcode_jwt') || ''
 
-  if (!token) {
-    throw createError({
-      statusCode: 401,
-      statusMessage: 'Invalid authorization token',
-    })
+  if (cookieToken) {
+    return cookieToken
   }
 
-  return token
+  throw createError({
+    statusCode: 401,
+    statusMessage: 'Missing authorization token',
+  })
 }
 
 export async function getCurrentStrapiUser(

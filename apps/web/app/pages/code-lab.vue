@@ -6,6 +6,7 @@ import MonacoCodeEditor from '~/components/code-lab/MonacoCodeEditor.client.vue'
 import { useCodeProjects } from '~/composables/useCodeProjects'
 import type { CodeProjectDto, SaveCodeProjectInput } from '~/types/code-project'
 
+
 definePageMeta({
   middleware: 'auth',
 })
@@ -163,15 +164,7 @@ async function runCode() {
   }
 }
 
-function getJwtToken() {
-  const token = useCookie<string | null>('netcode_jwt').value || ''
 
-  if (!token) {
-    throw new Error('Missing login token.')
-  }
-
-  return token
-}
 
 function buildProjectPayload(): SaveCodeProjectInput {
   const language = selectedLanguage.value?.slug
@@ -206,12 +199,13 @@ function createNewProject() {
 }
 
 async function fetchSavedProjects() {
-  const token = getJwtToken()
-
   savedProjectsLoading.value = true
   try {
-    const response = await codeProjectsApi.list(token)
+    const response = await codeProjectsApi.list()
     savedProjects.value = response.items
+  } catch (error: any) {
+    console.error('fetchSavedProjects error:', error)
+    alert(error?.data?.message || error?.message || 'Failed to load saved projects.')
   } finally {
     savedProjectsLoading.value = false
   }
@@ -219,17 +213,11 @@ async function fetchSavedProjects() {
 
 async function openSavedProjects() {
   savedProjectsDialog.value = true
-
-  try {
-    await fetchSavedProjects()
-  } catch (error) {
-    console.error('openSavedProjects error:', error)
-  }
+  await fetchSavedProjects()
 }
 
 async function saveProject() {
   try {
-    const token = getJwtToken()
     const payload = buildProjectPayload()
 
     saveLoading.value = true
@@ -237,15 +225,14 @@ async function saveProject() {
     if (currentProjectDocumentId.value) {
       const response = await codeProjectsApi.update(
         currentProjectDocumentId.value,
-        payload,
-        token
+        payload
       )
 
-      savedProjects.value = savedProjects.value.map((item) =>
+      savedProjects.value = savedProjects.value.map((item: CodeProjectDto) =>
         item.documentId === response.item.documentId ? response.item : item
       )
     } else {
-      const response = await codeProjectsApi.create(payload, token)
+      const response = await codeProjectsApi.create(payload)
       currentProjectDocumentId.value = response.item.documentId
       projectTitle.value = response.item.title
       savedProjects.value = [response.item, ...savedProjects.value]
@@ -285,13 +272,11 @@ async function deleteProjectFromList(item: CodeProjectDto) {
   if (!confirmed) return
 
   try {
-    const token = getJwtToken()
-
     deleteLoading.value = true
-    await codeProjectsApi.remove(item.documentId, token)
+    await codeProjectsApi.remove(item.documentId)
 
     savedProjects.value = savedProjects.value.filter(
-      (project) => project.documentId !== item.documentId
+      (project: CodeProjectDto) => project.documentId !== item.documentId
     )
 
     if (currentProjectDocumentId.value === item.documentId) {
@@ -314,7 +299,7 @@ async function deleteCurrentProject() {
   }
 
   const target = savedProjects.value.find(
-    (item) => item.documentId === currentProjectDocumentId.value
+    (item: CodeProjectDto) => item.documentId === currentProjectDocumentId.value
   )
 
   const confirmed = window.confirm(
@@ -323,13 +308,11 @@ async function deleteCurrentProject() {
   if (!confirmed) return
 
   try {
-    const token = getJwtToken()
-
     deleteLoading.value = true
-    await codeProjectsApi.remove(currentProjectDocumentId.value, token)
+    await codeProjectsApi.remove(currentProjectDocumentId.value)
 
     savedProjects.value = savedProjects.value.filter(
-      (item) => item.documentId !== currentProjectDocumentId.value
+      (item: CodeProjectDto) => item.documentId !== currentProjectDocumentId.value
     )
 
     createNewProject()

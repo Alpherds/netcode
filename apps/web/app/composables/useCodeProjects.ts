@@ -1,62 +1,46 @@
 import type {
   CodeProjectDto,
   SaveCodeProjectInput,
-} from '../types/code-project'
-
-function buildAuthHeaders(token: string) {
-  if (!token) {
-    throw new Error('Missing auth token')
-  }
-
-  return {
-    Authorization: `Bearer ${token}`,
-  }
-}
+} from '~/types/code-project'
 
 export function useCodeProjects() {
-  async function list(token: string) {
-    return await $fetch<{ items: CodeProjectDto[] }>('/api/code-projects', {
-      headers: buildAuthHeaders(token),
-    })
+  async function list() {
+    return await $fetch<{ items: CodeProjectDto[] }>('/api/code-projects')
   }
 
-  async function getOne(documentId: string, token: string) {
+  async function getOne(documentId: string) {
     return await $fetch<{ item: CodeProjectDto }>(
-      `/api/code-projects/${documentId}`,
-      {
-        headers: buildAuthHeaders(token),
-      }
+      `/api/code-projects/${documentId}`
     )
   }
 
-  async function create(input: SaveCodeProjectInput, token: string) {
+  async function create(input: SaveCodeProjectInput) {
     return await $fetch<{ item: CodeProjectDto }>('/api/code-projects', {
       method: 'POST',
-      headers: buildAuthHeaders(token),
       body: input,
     })
   }
 
   async function update(
     documentId: string,
-    input: SaveCodeProjectInput,
-    token: string
+    input: SaveCodeProjectInput
   ) {
     return await $fetch<{ item: CodeProjectDto }>(
       `/api/code-projects/${documentId}`,
       {
         method: 'PUT',
-        headers: buildAuthHeaders(token),
         body: input,
       }
     )
   }
 
-  async function remove(documentId: string, token: string) {
-    return await $fetch<{ success: true }>(`/api/code-projects/${documentId}`, {
-      method: 'DELETE',
-      headers: buildAuthHeaders(token),
-    })
+  async function remove(documentId: string) {
+    return await $fetch<{ success: true }>(
+      `/api/code-projects/${documentId}`,
+      {
+        method: 'DELETE',
+      }
+    )
   }
 
   return {
