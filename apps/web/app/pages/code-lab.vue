@@ -3,6 +3,8 @@
 import { computed, ref, watch } from 'vue'
 import { definePageMeta, navigateTo, useFetch } from '#imports'
 import MonacoCodeEditor from '~/components/code-lab/MonacoCodeEditor.client.vue'
+import { useCodeProjects } from '~/composables/useCodeProjects'
+import type { CodeProjectDto, SaveCodeProjectInput } from '~/types/code-project'
 
 definePageMeta({
   middleware: 'auth',
@@ -29,6 +31,8 @@ type RunResponse = {
   memory: number | null
 }
 
+
+
 const {
   data: languages,
   pending: languagesPending,
@@ -42,6 +46,16 @@ const stdinText = ref('')
 const isRunning = ref(false)
 const runResult = ref<RunResponse | null>(null)
 const runError = ref('')
+
+const codeProjectsApi = useCodeProjects()
+
+const projectTitle = ref('Untitled Code')
+const currentProjectDocumentId = ref('')
+const savedProjectsDialog = ref(false)
+const savedProjects = ref<CodeProjectDto[]>([])
+const savedProjectsLoading = ref(false)
+const saveLoading = ref(false)
+const deleteLoading = ref(false)
 
 const safeLanguages = computed(() => languages.value ?? [])
 
@@ -146,6 +160,193 @@ async function runCode() {
       'Failed to run code.'
   } finally {
     isRunning.value = false
+  }
+}
+
+function getJwtToken() {
+  if (!import.meta.client) {
+    throw new Error('Token lookup is only available on client side.')
+  }
+
+  const possibleKeys = [
+    'strapi_jwt',
+    'jwt',
+    'token',
+    'auth_token',
+    'netcode_token',
+  ]
+
+  for (const key of possibleKeys) {
+    const value = localStorage.getItem(key)
+    if (value) return value
+  }
+
+  throw new Error(
+    'Missing login token. Replace getJwtToken() with your real auth token source.'
+  )
+}
+
+function buildProjectPayload(): SaveCodeProjectInput {
+  const language = selectedLanguage.value?.slug
+
+  if (!language) {
+    throw new Error('Please choose a language first.')
+  }
+
+  return {
+    title: projectTitle.value.trim() || 'Untitled Code',
+    language,
+    sourceCode: sourceCode.value,
+    stdin: stdinText.value,
+    latestStdout: runResult.value?.stdout || '',
+    latestStderr: runResult.value?.stderr || '',
+    latestCompileOutput: runResult.value?.compile_output || '',
+    latestMessage: runResult.value?.message || '',
+    latestStatus: runResult.value?.status_description || '',
+    latestTime: runResult.value?.time ? String(runResult.value.time) : '',
+    latestMemory: runResult.value?.memory ?? null,
+    latestExitCode: runResult.value?.exit_code ?? null,
+    isSubmitted: false,
+    exerciseKey: '',
+  }
+}
+
+function createNewProject() {
+  currentProjectDocumentId.value = ''
+  projectTitle.value = 'Untitled Code'
+  stdinText.value = ''
+  resetEditorToTemplate()
+}
+
+async function fetchSavedProjects() {
+  const token = getJwtToken()
+
+  savedProjectsLoading.value = true
+  try {
+    const response = await codeProjectsApi.list(token)
+    savedProjects.value = response.items
+  } finally {
+    savedProjectsLoading.value = false
+  }
+}
+
+async function openSavedProjects() {
+  await fetchSavedProjects()
+  savedProjectsDialog.value = true
+}
+
+async function saveProject() {
+  try {
+    const token = getJwtToken()
+    const payload = buildProjectPayload()
+
+    saveLoading.value = true
+
+    if (currentProjectDocumentId.value) {
+      const response = await codeProjectsApi.update(
+        currentProjectDocumentId.value,
+        payload,
+        token
+      )
+
+      savedProjects.value = savedProjects.value.map((item) =>
+        item.documentId === response.item.documentId ? response.item : item
+      )
+    } else {
+      const response = await codeProjectsApi.create(payload, token)
+      currentProjectDocumentId.value = response.item.documentId
+      projectTitle.value = response.item.title
+      savedProjects.value = [response.item, ...savedProjects.value]
+    }
+
+    await fetchSavedProjects()
+    alert('Code project saved successfully.')
+  } catch (error: any) {
+    console.error('saveProject error:', error)
+    alert(error?.data?.message || error?.message || 'Failed to save project.')
+  } finally {
+    saveLoading.value = false
+  }
+}
+
+function loadProject(item: CodeProjectDto) {
+  currentProjectDocumentId.value = item.documentId
+  projectTitle.value = item.title
+  sourceCode.value = item.sourceCode
+  stdinText.value = item.stdin || ''
+  runResult.value = null
+  runError.value = ''
+
+  const matchedLanguage = safeLanguages.value.find(
+    (lang) => lang.slug === item.language
+  )
+
+  if (matchedLanguage) {
+    selectedLanguageId.value = matchedLanguage.id
+  }
+
+  savedProjectsDialog.value = false
+}
+
+async function deleteProjectFromList(item: CodeProjectDto) {
+  const confirmed = window.confirm(`Delete "${item.title}"?`)
+  if (!confirmed) return
+
+  try {
+    const token = getJwtToken()
+
+    deleteLoading.value = true
+    await codeProjectsApi.remove(item.documentId, token)
+
+    savedProjects.value = savedProjects.value.filter(
+      (project) => project.documentId !== item.documentId
+    )
+
+    if (currentProjectDocumentId.value === item.documentId) {
+      createNewProject()
+    }
+
+    alert('Code project deleted.')
+  } catch (error: any) {
+    console.error('deleteProjectFromList error:', error)
+    alert(error?.data?.message || error?.message || 'Failed to delete project.')
+  } finally {
+    deleteLoading.value = false
+  }
+}
+
+async function deleteCurrentProject() {
+  if (!currentProjectDocumentId.value) {
+    alert('No saved project selected.')
+    return
+  }
+
+  const target = savedProjects.value.find(
+    (item) => item.documentId === currentProjectDocumentId.value
+  )
+
+  const confirmed = window.confirm(
+    `Delete "${target?.title || projectTitle.value}"?`
+  )
+  if (!confirmed) return
+
+  try {
+    const token = getJwtToken()
+
+    deleteLoading.value = true
+    await codeProjectsApi.remove(currentProjectDocumentId.value, token)
+
+    savedProjects.value = savedProjects.value.filter(
+      (item) => item.documentId !== currentProjectDocumentId.value
+    )
+
+    createNewProject()
+    alert('Code project deleted.')
+  } catch (error: any) {
+    console.error('deleteCurrentProject error:', error)
+    alert(error?.data?.message || error?.message || 'Failed to delete project.')
+  } finally {
+    deleteLoading.value = false
   }
 }
 </script>
@@ -276,6 +477,59 @@ async function runCode() {
     </div>
 
     <ClientOnly>
+    
+<v-row dense class="mt-4 mb-4">
+  <v-col cols="12" md="4">
+    <v-text-field
+      v-model="projectTitle"
+      label="Project Title"
+      variant="outlined"
+      density="comfortable"
+      prepend-inner-icon="mdi-file-document-edit-outline"
+      hide-details
+    />
+  </v-col>
+
+  <v-col cols="12" md="8" class="d-flex flex-wrap justify-end ga-2">
+    <v-btn
+      variant="outlined"
+      prepend-icon="mdi-file-plus-outline"
+      @click="createNewProject"
+    >
+      New
+    </v-btn>
+
+    <v-btn
+      color="primary"
+      :loading="saveLoading"
+      prepend-icon="mdi-content-save-outline"
+      @click="saveProject"
+    >
+      {{ currentProjectDocumentId ? 'Update Save' : 'Save' }}
+    </v-btn>
+
+    <v-btn
+      variant="outlined"
+      prepend-icon="mdi-folder-open-outline"
+      :loading="savedProjectsLoading"
+      @click="openSavedProjects"
+    >
+      My Saved Codes
+    </v-btn>
+
+    <v-btn
+      color="error"
+      variant="tonal"
+      prepend-icon="mdi-delete-outline"
+      :disabled="!currentProjectDocumentId"
+      :loading="deleteLoading"
+      @click="deleteCurrentProject"
+    >
+      Delete
+    </v-btn>
+  </v-col>
+</v-row>
+
       <MonacoCodeEditor
         v-model="sourceCode"
         :language="selectedLanguage?.editorLanguage || 'plaintext'"
@@ -415,6 +669,76 @@ async function runCode() {
         </v-card>
       </v-col>
     </v-row>
+
+    <v-dialog v-model="savedProjectsDialog" max-width="900">
+  <v-card rounded="xl">
+    <v-card-title class="text-h6 font-weight-bold">
+      My Saved Codes
+    </v-card-title>
+
+    <v-card-text>
+      <v-alert
+        v-if="!savedProjectsLoading && savedProjects.length === 0"
+        type="info"
+        variant="tonal"
+        class="mb-4"
+      >
+        No saved code projects yet.
+      </v-alert>
+
+      <div v-if="savedProjectsLoading" class="py-6 text-center">
+        Loading saved projects...
+      </div>
+
+      <v-list v-else>
+        <v-list-item
+          v-for="item in savedProjects"
+          :key="item.documentId"
+          class="mb-2 rounded-lg border"
+        >
+          <v-list-item-title class="font-weight-bold">
+            {{ item.title }}
+          </v-list-item-title>
+
+          <v-list-item-subtitle>
+            {{ item.language.toUpperCase() }} •
+            Updated:
+            {{ item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '—' }}
+          </v-list-item-subtitle>
+
+          <template #append>
+            <div class="d-flex ga-2">
+              <v-btn
+                size="small"
+                color="primary"
+                variant="flat"
+                @click="loadProject(item)"
+              >
+                Open
+              </v-btn>
+
+              <v-btn
+                size="small"
+                color="error"
+                variant="tonal"
+                @click="deleteProjectFromList(item)"
+              >
+                Delete
+              </v-btn>
+            </div>
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-card-text>
+
+    <v-card-actions class="justify-end">
+      <v-btn variant="text" @click="savedProjectsDialog = false">
+        Close
+      </v-btn>
+    </v-card-actions>
+  </v-card>
+</v-dialog>
+
   </v-container>
 </template>
 
