@@ -19,6 +19,7 @@ export default defineNuxtConfig({
   JUDGE0_URL: process.env.JUDGE0_URL || '',
   JUDGE0_AUTH_TOKEN: process.env.JUDGE0_AUTH_TOKEN || '',
   JUDGE0_AUTH_HEADER: process.env.JUDGE0_AUTH_HEADER || 'X-Auth-Token',
+  INTERACTIVE_RUNNER_URL: process.env.INTERACTIVE_RUNNER_URL || 'http://51.254.130.38:8081',
 
     public: {
       strapiUrl: process.env.NUXT_PUBLIC_STRAPI_URL || '',
