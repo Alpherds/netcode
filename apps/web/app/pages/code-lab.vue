@@ -1,11 +1,10 @@
-
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { definePageMeta, navigateTo, useFetch, useCookie } from '#imports'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { definePageMeta, navigateTo, useFetch } from '#imports'
 import MonacoCodeEditor from '~/components/code-lab/MonacoCodeEditor.client.vue'
 import { useCodeProjects } from '~/composables/useCodeProjects'
+import { useInteractiveRunner } from '~/composables/useInteractiveRunner'
 import type { CodeProjectDto, SaveCodeProjectInput } from '~/types/code-project'
-
 
 definePageMeta({
   middleware: 'auth',
@@ -32,8 +31,6 @@ type RunResponse = {
   memory: number | null
 }
 
-
-
 const {
   data: languages,
   pending: languagesPending,
@@ -48,9 +45,8 @@ const isRunning = ref(false)
 const runResult = ref<RunResponse | null>(null)
 const runError = ref('')
 
-const autosaveRunLoading = ref(false)
-
 const codeProjectsApi = useCodeProjects()
+const interactiveApi = useInteractiveRunner()
 
 const projectTitle = ref('Untitled Code')
 const currentProjectDocumentId = ref('')
@@ -59,27 +55,30 @@ const savedProjects = ref<CodeProjectDto[]>([])
 const savedProjectsLoading = ref(false)
 const saveLoading = ref(false)
 const deleteLoading = ref(false)
-
-const safeLanguages = computed(() => languages.value ?? [])
-
-const selectedLanguage = computed(() => {
-  return safeLanguages.value.find(
-    (item) => item.id === selectedLanguageId.value,
-  ) || null
-})
+const autosaveRunLoading = ref(false)
 
 const feedbackOpen = ref(false)
 const feedbackMessage = ref('')
 const feedbackColor = ref<'success' | 'error' | 'warning' | 'info'>('success')
 
-function showFeedback(
-  message: string,
-  color: 'success' | 'error' | 'warning' | 'info' = 'success'
-) {
-  feedbackMessage.value = message
-  feedbackColor.value = color
-  feedbackOpen.value = true
-}
+const interactiveSessionId = ref('')
+const interactiveWs = ref<WebSocket | null>(null)
+const interactiveRunning = ref(false)
+const interactiveConnecting = ref(false)
+const interactiveInput = ref('')
+const interactiveOutput = ref('')
+const interactiveStatus = ref('Idle')
+
+const applyingLoadedProject = ref(false)
+
+const safeLanguages = computed(() => languages.value ?? [])
+
+const selectedLanguage = computed(() => {
+  return (
+    safeLanguages.value.find((item) => item.id === selectedLanguageId.value) ||
+    null
+  )
+})
 
 watch(
   safeLanguages,
@@ -98,7 +97,7 @@ watch(
       sourceCode.value = items[0]!.template
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 watch(selectedLanguageId, (value, oldValue) => {
@@ -106,6 +105,8 @@ watch(selectedLanguageId, (value, oldValue) => {
 
   const language = safeLanguages.value.find((item) => item.id === value)
   if (!language) return
+
+  if (applyingLoadedProject.value) return
 
   sourceCode.value = language.template
   runResult.value = null
@@ -131,6 +132,15 @@ const resultColor = computed(() => {
   return 'warning'
 })
 
+function showFeedback(
+  message: string,
+  color: 'success' | 'error' | 'warning' | 'info' = 'success'
+) {
+  feedbackMessage.value = message
+  feedbackColor.value = color
+  feedbackOpen.value = true
+}
+
 async function goBack() {
   await navigateTo('/')
 }
@@ -141,47 +151,6 @@ function resetEditorToTemplate() {
   runResult.value = null
   runError.value = ''
 }
-
-async function runCode() {
-  runError.value = ''
-  runResult.value = null
-
-  if (!selectedLanguageId.value) {
-    runError.value = 'Please choose a language.'
-    return
-  }
-
-  if (!sourceCode.value.trim()) {
-    runError.value = 'Source code is required.'
-    return
-  }
-
-  isRunning.value = true
-
-  try {
-    const response = await $fetch<RunResponse>('/api/code-lab/run', {
-      method: 'POST',
-      body: {
-        language_id: selectedLanguageId.value,
-        source_code: sourceCode.value,
-        stdin: stdinText.value,
-      },
-    })
-
-runResult.value = response
-
-await autosaveCurrentRunResult()
-  } catch (error: any) {
-    runError.value =
-      error?.data?.message ||
-      error?.statusMessage ||
-      'Failed to run code.'
-  } finally {
-    isRunning.value = false
-  }
-}
-
-
 
 function buildProjectPayload(): SaveCodeProjectInput {
   const language = selectedLanguage.value?.slug
@@ -208,13 +177,6 @@ function buildProjectPayload(): SaveCodeProjectInput {
   }
 }
 
-function createNewProject() {
-  currentProjectDocumentId.value = ''
-  projectTitle.value = 'Untitled Code'
-  stdinText.value = ''
-  resetEditorToTemplate()
-}
-
 async function fetchSavedProjects() {
   savedProjectsLoading.value = true
   try {
@@ -222,10 +184,12 @@ async function fetchSavedProjects() {
     savedProjects.value = response.items
   } catch (error: any) {
     console.error('fetchSavedProjects error:', error)
-   showFeedback(
-  error?.data?.message || error?.message || 'Failed to load saved projects.',
-  'error'
-)
+    showFeedback(
+      error?.data?.message ||
+        error?.message ||
+        'Failed to load saved projects.',
+      'error'
+    )
   } finally {
     savedProjectsLoading.value = false
   }
@@ -263,9 +227,9 @@ async function saveProject() {
   } catch (error: any) {
     console.error('saveProject error:', error)
     showFeedback(
-  error?.data?.message || error?.message || 'Failed to save project.',
-  'error'
-)
+      error?.data?.message || error?.message || 'Failed to save project.',
+      'error'
+    )
   } finally {
     saveLoading.value = false
   }
@@ -302,10 +266,243 @@ async function autosaveCurrentRunResult() {
   }
 }
 
+async function runCode() {
+  runError.value = ''
+  runResult.value = null
+
+  if (!selectedLanguageId.value) {
+    runError.value = 'Please choose a language.'
+    return
+  }
+
+  if (!sourceCode.value.trim()) {
+    runError.value = 'Source code is required.'
+    return
+  }
+
+  isRunning.value = true
+
+  try {
+    const response = await $fetch<RunResponse>('/api/code-lab/run', {
+      method: 'POST',
+      body: {
+        language_id: selectedLanguageId.value,
+        source_code: sourceCode.value,
+        stdin: stdinText.value,
+      },
+    })
+
+    runResult.value = response
+
+    await autosaveCurrentRunResult()
+  } catch (error: any) {
+    runError.value =
+      error?.data?.message ||
+      error?.statusMessage ||
+      'Failed to run code.'
+  } finally {
+    isRunning.value = false
+  }
+}
+
+function appendInteractiveOutput(text: string) {
+  interactiveOutput.value += text
+}
+
+function resetInteractiveConsole() {
+  interactiveOutput.value = ''
+  interactiveInput.value = ''
+  interactiveStatus.value = 'Idle'
+}
+
+function cleanupInteractiveSocket() {
+  if (interactiveWs.value) {
+    try {
+      interactiveWs.value.close()
+    } catch {}
+  }
+
+  interactiveWs.value = null
+  interactiveSessionId.value = ''
+  interactiveRunning.value = false
+  interactiveConnecting.value = false
+}
+
+function getInteractiveLanguage(): 'python' | 'cpp' | 'java' | null {
+  const slug = selectedLanguage.value?.slug
+
+  if (slug === 'python') return 'python'
+  if (slug === 'cpp') return 'cpp'
+  if (slug === 'java') return 'java'
+
+  return null
+}
+
+async function startInteractiveRun() {
+  try {
+    const language = getInteractiveLanguage()
+
+    if (!language) {
+      showFeedback(
+        'Interactive mode supports Python, C++, and Java only.',
+        'warning'
+      )
+      return
+    }
+
+    if (!sourceCode.value.trim()) {
+      showFeedback('Source code is required.', 'warning')
+      return
+    }
+
+    cleanupInteractiveSocket()
+    resetInteractiveConsole()
+
+    interactiveConnecting.value = true
+    interactiveStatus.value = 'Creating session...'
+
+    const response = await interactiveApi.createSession({
+      language,
+      sourceCode: sourceCode.value,
+    })
+
+    interactiveSessionId.value = response.sessionId
+    interactiveStatus.value = 'Connecting to runner...'
+
+    const ws = new WebSocket(response.wsUrl)
+    interactiveWs.value = ws
+
+    ws.onopen = () => {
+      interactiveConnecting.value = false
+      interactiveRunning.value = true
+      interactiveStatus.value = 'Connected'
+      appendInteractiveOutput('[interactive] session connected\n')
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data)
+
+        if (payload.type === 'status') {
+          interactiveStatus.value = payload.data || 'Connected'
+          appendInteractiveOutput(`[status] ${payload.data}\n`)
+          return
+        }
+
+        if (payload.type === 'stdout') {
+          appendInteractiveOutput(payload.data || '')
+          return
+        }
+
+        if (payload.type === 'stderr') {
+          appendInteractiveOutput(payload.data || '')
+          return
+        }
+
+        if (payload.type === 'error') {
+          interactiveStatus.value = 'Error'
+          appendInteractiveOutput(
+            `[error] ${payload.message || 'Unknown error'}\n`
+          )
+          return
+        }
+
+        if (payload.type === 'exit') {
+          interactiveStatus.value = `Exited (${payload.exitCode ?? '—'})`
+          appendInteractiveOutput(`\n[exit] code=${payload.exitCode ?? '—'}\n`)
+          interactiveRunning.value = false
+          return
+        }
+      } catch {
+        appendInteractiveOutput(String(event.data || ''))
+      }
+    }
+
+    ws.onerror = () => {
+      interactiveStatus.value = 'WebSocket error'
+      showFeedback('Interactive WebSocket connection failed.', 'error')
+    }
+
+    ws.onclose = () => {
+      interactiveRunning.value = false
+      interactiveConnecting.value = false
+      interactiveWs.value = null
+      interactiveSessionId.value = ''
+      appendInteractiveOutput('\n[interactive] session closed\n')
+    }
+  } catch (error: any) {
+    interactiveConnecting.value = false
+    interactiveRunning.value = false
+    interactiveStatus.value = 'Failed'
+
+    console.error('startInteractiveRun error:', error)
+
+    showFeedback(
+      error?.data?.message ||
+        error?.message ||
+        'Failed to start interactive session.',
+      'error'
+    )
+  }
+}
+
+function sendInteractiveInput() {
+  if (!interactiveWs.value || interactiveWs.value.readyState !== WebSocket.OPEN) {
+    showFeedback('Interactive session is not connected.', 'warning')
+    return
+  }
+
+  const text = interactiveInput.value
+  if (!text) return
+
+  interactiveWs.value.send(
+    JSON.stringify({
+      type: 'stdin',
+      data: text.endsWith('\n') ? text : `${text}\n`,
+    })
+  )
+
+  interactiveInput.value = ''
+}
+
+async function stopInteractiveRun() {
+  try {
+    if (!interactiveSessionId.value) {
+      cleanupInteractiveSocket()
+      return
+    }
+
+    await interactiveApi.stopSession(interactiveSessionId.value)
+    appendInteractiveOutput('\n[interactive] stop requested\n')
+    interactiveStatus.value = 'Stopping...'
+  } catch (error: any) {
+    console.error('stopInteractiveRun error:', error)
+
+    showFeedback(
+      error?.data?.message ||
+        error?.message ||
+        'Failed to stop interactive session.',
+      'error'
+    )
+  }
+}
+
+function createNewProject() {
+  cleanupInteractiveSocket()
+  resetInteractiveConsole()
+
+  currentProjectDocumentId.value = ''
+  projectTitle.value = 'Untitled Code'
+  stdinText.value = ''
+  resetEditorToTemplate()
+}
+
 function loadProject(item: CodeProjectDto) {
+  cleanupInteractiveSocket()
+  resetInteractiveConsole()
+
   currentProjectDocumentId.value = item.documentId
   projectTitle.value = item.title
-  sourceCode.value = item.sourceCode
   stdinText.value = item.stdin || ''
   runResult.value = null
   runError.value = ''
@@ -314,9 +511,17 @@ function loadProject(item: CodeProjectDto) {
     (lang) => lang.slug === item.language
   )
 
+  applyingLoadedProject.value = true
+
   if (matchedLanguage) {
     selectedLanguageId.value = matchedLanguage.id
   }
+
+  sourceCode.value = item.sourceCode
+
+  setTimeout(() => {
+    applyingLoadedProject.value = false
+  }, 0)
 
   savedProjectsDialog.value = false
 }
@@ -337,13 +542,13 @@ async function deleteProjectFromList(item: CodeProjectDto) {
       createNewProject()
     }
 
-showFeedback('Code project deleted.', 'success')
+    showFeedback('Code project deleted.', 'success')
   } catch (error: any) {
     console.error('deleteProjectFromList error:', error)
-   showFeedback(
-  error?.data?.message || error?.message || 'Failed to delete project.',
-  'error'
-)
+    showFeedback(
+      error?.data?.message || error?.message || 'Failed to delete project.',
+      'error'
+    )
   } finally {
     deleteLoading.value = false
   }
@@ -356,7 +561,8 @@ async function deleteCurrentProject() {
   }
 
   const target = savedProjects.value.find(
-    (item: CodeProjectDto) => item.documentId === currentProjectDocumentId.value
+    (item: CodeProjectDto) =>
+      item.documentId === currentProjectDocumentId.value
   )
 
   const confirmed = window.confirm(
@@ -369,28 +575,35 @@ async function deleteCurrentProject() {
     await codeProjectsApi.remove(currentProjectDocumentId.value)
 
     savedProjects.value = savedProjects.value.filter(
-      (item: CodeProjectDto) => item.documentId !== currentProjectDocumentId.value
+      (item: CodeProjectDto) =>
+        item.documentId !== currentProjectDocumentId.value
     )
 
     createNewProject()
     showFeedback('Code project deleted.', 'success')
   } catch (error: any) {
     console.error('deleteCurrentProject error:', error)
-   showFeedback(
-  error?.data?.message || error?.message || 'Failed to delete project.',
-  'error'
-)
+    showFeedback(
+      error?.data?.message || error?.message || 'Failed to delete project.',
+      'error'
+    )
   } finally {
     deleteLoading.value = false
   }
 }
+
+onBeforeUnmount(() => {
+  cleanupInteractiveSocket()
+})
 </script>
 
 <template>
   <v-container fluid class="code-lab-page pa-4 pa-md-6">
     <v-card rounded="xl" elevation="4" class="hero-card mb-6">
       <v-card-text class="pa-5 pa-md-7">
-        <div class="d-flex justify-space-between align-start flex-wrap ga-4 mb-5">
+        <div
+          class="d-flex justify-space-between align-start flex-wrap ga-4 mb-5"
+        >
           <v-btn
             variant="text"
             color="primary"
@@ -412,7 +625,9 @@ async function deleteCurrentProject() {
           </v-chip>
         </div>
 
-        <div class="d-flex flex-column flex-lg-row justify-space-between align-start ga-6">
+        <div
+          class="d-flex flex-column flex-lg-row justify-space-between align-start ga-6"
+        >
           <div class="hero-copy">
             <div class="text-overline text-primary font-weight-bold mb-2">
               Learning Tools / Code Lab
@@ -435,7 +650,9 @@ async function deleteCurrentProject() {
             </div>
 
             <p class="text-body-1 text-medium-emphasis mb-0">
-              This build now uses Monaco for the editor workspace while keeping the same Judge0 execution flow.
+              This build uses Monaco for the editor workspace, Judge0 for batch
+              execution, and a separate interactive runner for live stdin/stdout
+              sessions.
             </p>
           </div>
 
@@ -449,6 +666,17 @@ async function deleteCurrentProject() {
               @click="runCode"
             >
               Run Code
+            </v-btn>
+
+            <v-btn
+              color="deep-purple-darken-1"
+              rounded="pill"
+              size="large"
+              prepend-icon="mdi-console"
+              :loading="interactiveConnecting"
+              @click="startInteractiveRun"
+            >
+              Interactive Run
             </v-btn>
 
             <v-btn
@@ -483,12 +711,7 @@ async function deleteCurrentProject() {
           Failed to load Code Lab languages.
         </v-alert>
 
-        <v-alert
-          v-else
-          type="info"
-          variant="tonal"
-          class="mt-5"
-        >
+        <v-alert v-else type="info" variant="tonal" class="mt-5">
           Monaco editor is now active for the coding workspace.
         </v-alert>
       </v-card-text>
@@ -496,98 +719,105 @@ async function deleteCurrentProject() {
 
     <v-row dense>
       <v-col cols="12" lg="8">
-<v-card rounded="xl" elevation="3" class="section-card mb-6">
-  <v-card-text class="pa-5">
-    <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4">
-      <div>
-        <div class="text-h5 font-weight-bold">Editor Workspace</div>
-        <div class="text-body-2 text-medium-emphasis">
-          Write and run code from the selected language.
-        </div>
-      </div>
+        <v-card rounded="xl" elevation="3" class="section-card mb-6">
+          <v-card-text class="pa-5">
+            <div
+              class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
+            >
+              <div>
+                <div class="text-h5 font-weight-bold">Editor Workspace</div>
+                <div class="text-body-2 text-medium-emphasis">
+                  Write and run code from the selected language.
+                </div>
+              </div>
 
-      <v-chip color="primary" variant="tonal" rounded="pill">
-        {{ selectedLanguage?.name || 'No language selected' }}
-      </v-chip>
-    </div>
+              <v-chip color="primary" variant="tonal" rounded="pill">
+                {{ selectedLanguage?.name || 'No language selected' }}
+              </v-chip>
+            </div>
 
-    <ClientOnly>
-    
-<v-row dense class="mt-4 mb-4">
-  <v-col cols="12" md="4">
-    <v-text-field
-      v-model="projectTitle"
-      label="Project Title"
-      variant="outlined"
-      density="comfortable"
-      prepend-inner-icon="mdi-file-document-edit-outline"
-      hide-details
-    />
-  </v-col>
+            <v-row dense class="mt-4 mb-4">
+              <v-col cols="12" md="4">
+                <v-text-field
+                  v-model="projectTitle"
+                  label="Project Title"
+                  variant="outlined"
+                  density="comfortable"
+                  prepend-inner-icon="mdi-file-document-edit-outline"
+                  hide-details
+                />
+              </v-col>
 
-  <v-col cols="12" md="8" class="d-flex flex-wrap justify-end ga-2">
-    <v-btn
-      variant="outlined"
-      prepend-icon="mdi-file-plus-outline"
-      @click="createNewProject"
-    >
-      New
-    </v-btn>
+              <v-col
+                cols="12"
+                md="8"
+                class="d-flex flex-wrap justify-end ga-2"
+              >
+                <v-btn
+                  variant="outlined"
+                  prepend-icon="mdi-file-plus-outline"
+                  @click="createNewProject"
+                >
+                  New
+                </v-btn>
 
-    <v-btn
-      color="primary"
-      :loading="saveLoading"
-      prepend-icon="mdi-content-save-outline"
-      @click="saveProject"
-    >
-      {{ currentProjectDocumentId ? 'Update Save' : 'Save' }}
-    </v-btn>
+                <v-btn
+                  color="primary"
+                  :loading="saveLoading || autosaveRunLoading"
+                  prepend-icon="mdi-content-save-outline"
+                  @click="saveProject"
+                >
+                  {{ currentProjectDocumentId ? 'Update Save' : 'Save' }}
+                </v-btn>
 
-    <v-btn
-      variant="outlined"
-      prepend-icon="mdi-folder-open-outline"
-      :loading="savedProjectsLoading"
-      @click="openSavedProjects"
-    >
-      My Saved Codes
-    </v-btn>
+                <v-btn
+                  variant="outlined"
+                  prepend-icon="mdi-folder-open-outline"
+                  :loading="savedProjectsLoading"
+                  @click="openSavedProjects"
+                >
+                  My Saved Codes
+                </v-btn>
 
-    <v-btn
-      color="error"
-      variant="tonal"
-      prepend-icon="mdi-delete-outline"
-      :disabled="!currentProjectDocumentId"
-      :loading="deleteLoading"
-      @click="deleteCurrentProject"
-    >
-      Delete
-    </v-btn>
-  </v-col>
-</v-row>
+                <v-btn
+                  color="error"
+                  variant="tonal"
+                  prepend-icon="mdi-delete-outline"
+                  :disabled="!currentProjectDocumentId"
+                  :loading="deleteLoading"
+                  @click="deleteCurrentProject"
+                >
+                  Delete
+                </v-btn>
+              </v-col>
+            </v-row>
 
-      <MonacoCodeEditor
-        v-model="sourceCode"
-        :language="selectedLanguage?.editorLanguage || 'plaintext'"
-        :height="560"
-      />
+            <ClientOnly>
+              <MonacoCodeEditor
+                v-model="sourceCode"
+                :language="selectedLanguage?.editorLanguage || 'plaintext'"
+                :height="560"
+              />
 
-      <template #fallback>
-        <v-sheet
-          rounded="xl"
-          color="#0f172a"
-          class="d-flex align-center justify-center"
-          style="height: 560px; color: white;"
-        >
-          Loading editor...
-        </v-sheet>
-      </template>
-    </ClientOnly>
-  </v-card-text>
-</v-card>
+              <template #fallback>
+                <v-sheet
+                  rounded="xl"
+                  color="#0f172a"
+                  class="d-flex align-center justify-center"
+                  style="height: 560px; color: white"
+                >
+                  Loading editor...
+                </v-sheet>
+              </template>
+            </ClientOnly>
+          </v-card-text>
+        </v-card>
 
         <v-card rounded="xl" elevation="3" class="section-card">
           <v-card-text class="pa-5">
-            <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4">
+            <div
+              class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
+            >
               <div>
                 <div class="text-h5 font-weight-bold">Program Output</div>
                 <div class="text-body-2 text-medium-emphasis">
@@ -667,33 +897,139 @@ async function deleteCurrentProject() {
           </v-card-text>
         </v-card>
 
+        <v-card rounded="xl" elevation="3" class="section-card mb-6">
+          <v-card-text class="pa-5">
+            <div
+              class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
+            >
+              <div>
+                <div class="text-h5 font-weight-bold">Interactive Console</div>
+                <div class="text-body-2 text-medium-emphasis">
+                  Start a live interactive session and send input while the
+                  program is running.
+                </div>
+              </div>
+
+              <v-chip
+                :color="
+                  interactiveRunning
+                    ? 'success'
+                    : interactiveConnecting
+                      ? 'warning'
+                      : 'grey'
+                "
+                variant="tonal"
+                rounded="pill"
+              >
+                {{ interactiveStatus }}
+              </v-chip>
+            </div>
+
+            <v-sheet
+              rounded="xl"
+              color="#0f172a"
+              class="output-shell pa-4 mb-4"
+            >
+              <pre class="output-pre">{{
+                interactiveOutput || 'Interactive output will appear here.'
+              }}</pre>
+            </v-sheet>
+
+            <v-text-field
+              v-model="interactiveInput"
+              label="Send Input"
+              variant="outlined"
+              rounded="xl"
+              density="comfortable"
+              class="mb-3"
+              @keyup.enter="sendInteractiveInput"
+            />
+
+            <div class="d-flex flex-column ga-3">
+              <v-btn
+                block
+                color="deep-purple-darken-1"
+                rounded="pill"
+                prepend-icon="mdi-send"
+                :disabled="!interactiveRunning"
+                @click="sendInteractiveInput"
+              >
+                Send Input
+              </v-btn>
+
+              <v-btn
+                block
+                color="error"
+                variant="outlined"
+                rounded="pill"
+                prepend-icon="mdi-stop-circle-outline"
+                :disabled="!interactiveRunning && !interactiveConnecting"
+                @click="stopInteractiveRun"
+              >
+                Stop Session
+              </v-btn>
+
+              <v-btn
+                block
+                color="grey-darken-2"
+                variant="outlined"
+                rounded="pill"
+                prepend-icon="mdi-broom"
+                @click="resetInteractiveConsole"
+              >
+                Clear Console
+              </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
+
         <v-card rounded="xl" elevation="3" class="section-card">
           <v-card-text class="pa-5">
             <div class="text-h6 font-weight-bold mb-3">Execution Summary</div>
 
             <div class="d-flex flex-wrap ga-3">
-              <v-sheet rounded="xl" color="primary" variant="tonal" class="summary-box pa-4">
+              <v-sheet
+                rounded="xl"
+                color="primary"
+                variant="tonal"
+                class="summary-box pa-4"
+              >
                 <div class="text-overline">Language</div>
                 <div class="text-body-1 font-weight-bold">
                   {{ selectedLanguage?.slug?.toUpperCase() || '—' }}
                 </div>
               </v-sheet>
 
-              <v-sheet rounded="xl" color="success" variant="tonal" class="summary-box pa-4">
+              <v-sheet
+                rounded="xl"
+                color="success"
+                variant="tonal"
+                class="summary-box pa-4"
+              >
                 <div class="text-overline">Time</div>
                 <div class="text-body-1 font-weight-bold">
                   {{ runResult?.time ?? '—' }}
                 </div>
               </v-sheet>
 
-              <v-sheet rounded="xl" color="indigo" variant="tonal" class="summary-box pa-4">
+              <v-sheet
+                rounded="xl"
+                color="indigo"
+                variant="tonal"
+                class="summary-box pa-4"
+              >
                 <div class="text-overline">Memory</div>
                 <div class="text-body-1 font-weight-bold">
                   {{ runResult?.memory ?? '—' }}
                 </div>
               </v-sheet>
 
-              <v-sheet rounded="xl" color="warning" variant="tonal" class="summary-box pa-4">
+              <v-sheet
+                rounded="xl"
+                color="warning"
+                variant="tonal"
+                class="summary-box pa-4"
+              >
                 <div class="text-overline">Exit Code</div>
                 <div class="text-body-1 font-weight-bold">
                   {{ runResult?.exit_code ?? '—' }}
@@ -706,94 +1042,92 @@ async function deleteCurrentProject() {
     </v-row>
 
     <v-dialog v-model="savedProjectsDialog" max-width="900">
-  <v-card rounded="xl">
-    <v-card-title class="text-h6 font-weight-bold">
-      My Saved Codes
-    </v-card-title>
+      <v-card rounded="xl">
+        <v-card-title class="text-h6 font-weight-bold">
+          My Saved Codes
+        </v-card-title>
 
-    <v-card-text>
-      <v-alert
-        v-if="!savedProjectsLoading && savedProjects.length === 0"
-        type="info"
-        variant="tonal"
-        class="mb-4"
-      >
-        No saved code projects yet.
-      </v-alert>
+        <v-card-text>
+          <v-alert
+            v-if="!savedProjectsLoading && savedProjects.length === 0"
+            type="info"
+            variant="tonal"
+            class="mb-4"
+          >
+            No saved code projects yet.
+          </v-alert>
 
-      <div v-if="savedProjectsLoading" class="py-6 text-center">
-        Loading saved projects...
-      </div>
+          <div v-if="savedProjectsLoading" class="py-6 text-center">
+            Loading saved projects...
+          </div>
 
-      <v-list v-else>
-        <v-list-item
-          v-for="item in savedProjects"
-          :key="item.documentId"
-          class="mb-2 rounded-lg border"
-        >
-          <v-list-item-title class="font-weight-bold">
-            {{ item.title }}
-          </v-list-item-title>
+          <v-list v-else>
+            <v-list-item
+              v-for="item in savedProjects"
+              :key="item.documentId"
+              class="mb-2 rounded-lg border"
+            >
+              <v-list-item-title class="font-weight-bold">
+                {{ item.title }}
+              </v-list-item-title>
 
-          <v-list-item-subtitle>
-            {{ item.language.toUpperCase() }} •
-            Updated:
-            {{ item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '—' }}
-          </v-list-item-subtitle>
+              <v-list-item-subtitle>
+                {{ item.language.toUpperCase() }} • Updated:
+                {{
+                  item.updatedAt
+                    ? new Date(item.updatedAt).toLocaleString()
+                    : '—'
+                }}
+              </v-list-item-subtitle>
 
-          <template #append>
-            <div class="d-flex ga-2">
-              <v-btn
-                size="small"
-                color="primary"
-                variant="flat"
-                @click="loadProject(item)"
-              >
-                Open
-              </v-btn>
+              <template #append>
+                <div class="d-flex ga-2">
+                  <v-btn
+                    size="small"
+                    color="primary"
+                    variant="flat"
+                    @click="loadProject(item)"
+                  >
+                    Open
+                  </v-btn>
 
-              <v-btn
-                size="small"
-                color="error"
-                variant="tonal"
-                @click="deleteProjectFromList(item)"
-              >
-                Delete
-              </v-btn>
-            </div>
-          </template>
-        </v-list-item>
-      </v-list>
-    </v-card-text>
+                  <v-btn
+                    size="small"
+                    color="error"
+                    variant="tonal"
+                    @click="deleteProjectFromList(item)"
+                  >
+                    Delete
+                  </v-btn>
+                </div>
+              </template>
+            </v-list-item>
+          </v-list>
+        </v-card-text>
 
-    <v-card-actions class="justify-end">
-      <v-btn variant="text" @click="savedProjectsDialog = false">
-        Close
-      </v-btn>
-    </v-card-actions>
-  </v-card>
-</v-dialog>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="savedProjectsDialog = false">
+            Close
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
-<v-snackbar
-  v-model="feedbackOpen"
-  :color="feedbackColor"
-  timeout="2500"
-  location="top right"
-  rounded="pill"
->
-  {{ feedbackMessage }}
-
-  <template #actions>
-    <v-btn
-      variant="text"
-      color="white"
-      @click="feedbackOpen = false"
+    <v-snackbar
+      v-model="feedbackOpen"
+      :color="feedbackColor"
+      timeout="2500"
+      location="top right"
+      rounded="pill"
     >
-      Close
-    </v-btn>
-  </template>
-</v-snackbar>
+      {{ feedbackMessage }}
 
+      <template #actions>
+        <v-btn variant="text" color="white" @click="feedbackOpen = false">
+          Close
+        </v-btn>
+      </template>
+    </v-snackbar>
   </v-container>
 </template>
 
@@ -842,7 +1176,13 @@ async function deleteCurrentProject() {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
   font-size: 13px;
   line-height: 1.6;
   color: #e5e7eb;
