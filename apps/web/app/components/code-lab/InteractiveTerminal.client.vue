@@ -196,12 +196,13 @@ onMounted(async () => {
 
     const code = data.charCodeAt(0)
 
-    if (code === 13) {
-      const value = inputBuffer
-      inputBuffer = ''
-      sendInput(value)
-      return
-    }
+if (code === 13) {
+  const value = inputBuffer
+  inputBuffer = ''
+  terminal.write('\r\n')
+  sendInput(value)
+  return
+}
 
     if (code === 127) {
       if (inputBuffer.length > 0) {
