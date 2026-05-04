@@ -548,8 +548,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-container fluid class="code-lab-page pa-4 pa-md-6">
-    <v-card rounded="xl" elevation="4" class="hero-card mb-6">
+  <v-container fluid class="code-lab-page premium-shell pa-4 pa-md-6">
+    <v-card rounded="xl" elevation="0" class="hero-card premium-hero mb-6">
       <v-card-text class="pa-5 pa-md-7">
         <div
           class="d-flex justify-space-between align-start flex-wrap ga-4 mb-5"
@@ -618,9 +618,9 @@ onBeforeUnmount(() => {
       </v-card-text>
     </v-card>
 
-    <v-row dense align="stretch">
+    <v-row dense align="stretch" class="workspace-grid">
       <v-col cols="12" lg="8">
-        <v-card rounded="xl" elevation="3" class="section-card editor-card h-100">
+        <v-card rounded="xl" elevation="0" class="section-card premium-card editor-card h-100">
           <v-card-text class="pa-5">
             <div
               class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
@@ -633,7 +633,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <v-row dense class="mt-2 mb-4">
+            <v-row dense class="toolbar-shell mt-2 mb-4">
               <v-col cols="12" md="4">
                 <v-text-field
                   v-model="projectTitle"
@@ -662,7 +662,7 @@ onBeforeUnmount(() => {
               <v-col
                 cols="12"
                 md="5"
-                class="d-flex flex-wrap justify-end ga-2"
+                class="d-flex flex-wrap justify-end ga-2 toolbar-actions"
               >
                 <v-btn
                   color="primary"
@@ -752,7 +752,7 @@ onBeforeUnmount(() => {
       </v-col>
 
       <v-col cols="12" lg="4">
-        <v-card rounded="xl" elevation="3" class="section-card console-card h-100">
+        <v-card rounded="xl" elevation="0" class="section-card premium-card console-card h-100">
           <v-card-text class="pa-5 d-flex flex-column fill-height">
             <div
               class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
@@ -800,7 +800,7 @@ onBeforeUnmount(() => {
 
             <div class="console-body flex-grow-1">
               <div v-if="!interactiveMode" class="h-100">
-                <v-sheet rounded="xl" color="#0f172a" class="output-shell pa-4 h-100">
+                <v-sheet rounded="xl" color="#0f172a" class="output-shell premium-console-shell pa-4 h-100">
                   <pre class="output-pre">{{ outputText }}</pre>
                 </v-sheet>
               </div>
@@ -956,33 +956,135 @@ onBeforeUnmount(() => {
 .code-lab-page {
   min-height: 100vh;
   background:
-    radial-gradient(circle at top right, rgba(37, 99, 235, 0.06), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(99, 102, 241, 0.05), transparent 32%),
-    #f5f7fb;
+    radial-gradient(circle at top left, rgba(59, 130, 246, 0.10), transparent 26%),
+    radial-gradient(circle at top right, rgba(139, 92, 246, 0.10), transparent 24%),
+    radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.08), transparent 22%),
+    linear-gradient(180deg, #f8fbff 0%, #f3f6fb 45%, #eef3f9 100%);
+}
+
+.premium-shell {
+  position: relative;
 }
 
 .hero-card {
+  overflow: hidden;
+  position: relative;
+  border-radius: 28px !important;
+}
+
+.premium-hero {
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.92));
-  border: 1px solid rgba(37, 99, 235, 0.08);
+    linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(245,248,255,0.96) 45%, rgba(237,242,255,0.96) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.06),
+    0 1px 0 rgba(255,255,255,0.8) inset;
+}
+
+.premium-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 85% 18%, rgba(59, 130, 246, 0.12), transparent 20%),
+    radial-gradient(circle at 72% 22%, rgba(139, 92, 246, 0.10), transparent 18%);
+  pointer-events: none;
 }
 
 .section-card {
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  background: rgba(255, 255, 255, 0.96);
+  position: relative;
+  border-radius: 26px !important;
+  background: rgba(255,255,255,0.84);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.06),
+    0 1px 0 rgba(255,255,255,0.9) inset;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.section-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 18px 38px rgba(15, 23, 42, 0.09),
+    0 1px 0 rgba(255,255,255,0.92) inset;
+  border-color: rgba(99, 102, 241, 0.18);
+}
+
+.editor-card::before,
+.console-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  border-radius: 26px 26px 0 0;
+}
+
+.editor-card::before {
+  background: linear-gradient(90deg, #2563eb, #7c3aed);
+}
+
+.console-card::before {
+  background: linear-gradient(90deg, #7c3aed, #0ea5e9);
 }
 
 .back-button {
   padding-inline: 0;
+  font-weight: 600;
 }
 
 .hero-copy {
-  max-width: 860px;
+  max-width: 900px;
+  position: relative;
+  z-index: 1;
 }
 
-.editor-card,
-.console-card {
-  min-height: 100%;
+.hero-copy .text-h4 {
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.hero-copy .text-body-1 {
+  max-width: 760px;
+  line-height: 1.7;
+}
+
+.workspace-grid {
+  gap: 6px 0;
+}
+
+.toolbar-shell {
+  margin-inline: 0;
+  padding: 12px;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(248,250,252,0.92), rgba(241,245,249,0.82));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.04),
+    0 1px 0 rgba(255,255,255,0.85) inset;
+}
+
+.toolbar-actions :deep(.v-btn) {
+  border-radius: 14px !important;
+  text-transform: none;
+  font-weight: 600;
+  letter-spacing: 0;
+  min-height: 38px;
+  box-shadow: none;
+}
+
+.toolbar-actions :deep(.v-btn--variant-outlined) {
+  border-color: rgba(100, 116, 139, 0.24);
+  background: rgba(255,255,255,0.66);
+}
+
+.toolbar-actions :deep(.v-btn:hover) {
+  transform: translateY(-1px);
 }
 
 .console-body {
@@ -992,6 +1094,16 @@ onBeforeUnmount(() => {
 .output-shell {
   min-height: 620px;
   overflow: auto;
+  border: 1px solid rgba(99, 102, 241, 0.14);
+}
+
+.premium-console-shell {
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.08), transparent 24%),
+    linear-gradient(180deg, #07142f 0%, #081630 45%, #08152b 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    inset 0 0 0 1px rgba(255,255,255,0.02);
 }
 
 .output-pre {
@@ -1006,7 +1118,7 @@ onBeforeUnmount(() => {
     Consolas,
     monospace;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.65;
   color: #e5e7eb;
 }
 
@@ -1017,6 +1129,43 @@ onBeforeUnmount(() => {
 .console-terminal :deep(.terminal-container) {
   height: 620px;
   width: 100%;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(99, 102, 241, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.03),
+    inset 0 0 0 1px rgba(255,255,255,0.02);
+}
+
+.console-terminal :deep(.xterm) {
+  padding: 14px 12px;
+}
+
+:deep(.v-field) {
+  border-radius: 16px !important;
+}
+
+:deep(.v-field--variant-outlined .v-field__outline) {
+  --v-field-border-opacity: 0.22;
+}
+
+:deep(.v-chip) {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+:deep(.v-alert) {
+  border-radius: 18px !important;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+:deep(.v-list-item) {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(255,255,255,0.74);
+}
+
+:deep(.v-list-item:hover) {
+  background: rgba(248,250,252,0.96);
 }
 
 @media (max-width: 1280px) {
@@ -1030,12 +1179,34 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 960px) {
+  .toolbar-shell {
+    padding: 10px;
+  }
+
   .console-body,
   .output-shell,
   .console-terminal :deep(.terminal-wrapper),
   .console-terminal :deep(.terminal-container) {
     min-height: 320px;
     height: 320px;
+  }
+
+  .toolbar-actions {
+    justify-content: flex-start !important;
+  }
+
+  .toolbar-actions :deep(.v-btn) {
+    flex: 1 1 calc(50% - 8px);
+  }
+}
+
+@media (max-width: 640px) {
+  .toolbar-actions :deep(.v-btn) {
+    flex: 1 1 100%;
+  }
+
+  .hero-copy .text-h4 {
+    font-size: 1.7rem !important;
   }
 }
 </style>
