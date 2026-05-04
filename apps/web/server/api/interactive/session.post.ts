@@ -44,10 +44,10 @@ export default defineEventHandler(async (event) => {
       },
     })
 
-    return {
-      sessionId: response.sessionId,
-      wsUrl: `${runnerUrl.replace(/^http/, 'ws')}/ws/${response.sessionId}`,
-    }
+   return {
+  sessionId: response.sessionId,
+  wsUrl: `wss://51.254.130.38/ws/${response.sessionId}`,
+}
   } catch (error: any) {
     throw createError({
       statusCode: error?.statusCode || 500,

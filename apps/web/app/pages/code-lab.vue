@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { definePageMeta, navigateTo, useFetch } from '#imports'
 import MonacoCodeEditor from '~/components/code-lab/MonacoCodeEditor.client.vue'
+import InteractiveTerminal from '~/components/code-lab/InteractiveTerminal.client.vue'
 import { useCodeProjects } from '~/composables/useCodeProjects'
 import { useInteractiveRunner } from '~/composables/useInteractiveRunner'
 import type { CodeProjectDto, SaveCodeProjectInput } from '~/types/code-project'
@@ -62,14 +63,14 @@ const feedbackMessage = ref('')
 const feedbackColor = ref<'success' | 'error' | 'warning' | 'info'>('success')
 
 const interactiveSessionId = ref('')
-const interactiveWs = ref<WebSocket | null>(null)
+const interactiveWsUrl = ref('')
 const interactiveRunning = ref(false)
 const interactiveConnecting = ref(false)
-const interactiveInput = ref('')
-const interactiveOutput = ref('')
 const interactiveStatus = ref('Idle')
+const interactiveMode = ref(false)
 
 const applyingLoadedProject = ref(false)
+const terminalRef = ref<InstanceType<typeof InteractiveTerminal> | null>(null)
 
 const safeLanguages = computed(() => languages.value ?? [])
 
@@ -269,6 +270,7 @@ async function autosaveCurrentRunResult() {
 async function runCode() {
   runError.value = ''
   runResult.value = null
+  interactiveMode.value = false
 
   if (!selectedLanguageId.value) {
     runError.value = 'Please choose a language.'
@@ -305,29 +307,6 @@ async function runCode() {
   }
 }
 
-function appendInteractiveOutput(text: string) {
-  interactiveOutput.value += text
-}
-
-function resetInteractiveConsole() {
-  interactiveOutput.value = ''
-  interactiveInput.value = ''
-  interactiveStatus.value = 'Idle'
-}
-
-function cleanupInteractiveSocket() {
-  if (interactiveWs.value) {
-    try {
-      interactiveWs.value.close()
-    } catch {}
-  }
-
-  interactiveWs.value = null
-  interactiveSessionId.value = ''
-  interactiveRunning.value = false
-  interactiveConnecting.value = false
-}
-
 function getInteractiveLanguage(): 'python' | 'cpp' | 'java' | null {
   const slug = selectedLanguage.value?.slug
 
@@ -336,6 +315,14 @@ function getInteractiveLanguage(): 'python' | 'cpp' | 'java' | null {
   if (slug === 'java') return 'java'
 
   return null
+}
+
+function resetInteractiveState() {
+  interactiveSessionId.value = ''
+  interactiveWsUrl.value = ''
+  interactiveRunning.value = false
+  interactiveConnecting.value = false
+  interactiveStatus.value = 'Idle'
 }
 
 async function startInteractiveRun() {
@@ -355,9 +342,8 @@ async function startInteractiveRun() {
       return
     }
 
-    cleanupInteractiveSocket()
-    resetInteractiveConsole()
-
+    interactiveMode.value = true
+    resetInteractiveState()
     interactiveConnecting.value = true
     interactiveStatus.value = 'Creating session...'
 
@@ -367,69 +353,12 @@ async function startInteractiveRun() {
     })
 
     interactiveSessionId.value = response.sessionId
-    interactiveStatus.value = 'Connecting to runner...'
+    interactiveWsUrl.value = response.wsUrl
+    interactiveStatus.value = 'Connecting...'
 
-    const ws = new WebSocket(response.wsUrl)
-    interactiveWs.value = ws
-
-    ws.onopen = () => {
-      interactiveConnecting.value = false
-      interactiveRunning.value = true
-      interactiveStatus.value = 'Connected'
-      appendInteractiveOutput('[interactive] session connected\n')
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data)
-
-        if (payload.type === 'status') {
-          interactiveStatus.value = payload.data || 'Connected'
-          appendInteractiveOutput(`[status] ${payload.data}\n`)
-          return
-        }
-
-        if (payload.type === 'stdout') {
-          appendInteractiveOutput(payload.data || '')
-          return
-        }
-
-        if (payload.type === 'stderr') {
-          appendInteractiveOutput(payload.data || '')
-          return
-        }
-
-        if (payload.type === 'error') {
-          interactiveStatus.value = 'Error'
-          appendInteractiveOutput(
-            `[error] ${payload.message || 'Unknown error'}\n`
-          )
-          return
-        }
-
-        if (payload.type === 'exit') {
-          interactiveStatus.value = `Exited (${payload.exitCode ?? '—'})`
-          appendInteractiveOutput(`\n[exit] code=${payload.exitCode ?? '—'}\n`)
-          interactiveRunning.value = false
-          return
-        }
-      } catch {
-        appendInteractiveOutput(String(event.data || ''))
-      }
-    }
-
-    ws.onerror = () => {
-      interactiveStatus.value = 'WebSocket error'
-      showFeedback('Interactive WebSocket connection failed.', 'error')
-    }
-
-    ws.onclose = () => {
-      interactiveRunning.value = false
-      interactiveConnecting.value = false
-      interactiveWs.value = null
-      interactiveSessionId.value = ''
-      appendInteractiveOutput('\n[interactive] session closed\n')
-    }
+    await nextTick()
+    terminalRef.value?.clearTerminal()
+    terminalRef.value?.connect()
   } catch (error: any) {
     interactiveConnecting.value = false
     interactiveRunning.value = false
@@ -446,34 +375,15 @@ async function startInteractiveRun() {
   }
 }
 
-function sendInteractiveInput() {
-  if (!interactiveWs.value || interactiveWs.value.readyState !== WebSocket.OPEN) {
-    showFeedback('Interactive session is not connected.', 'warning')
-    return
-  }
-
-  const text = interactiveInput.value
-  if (!text) return
-
-  interactiveWs.value.send(
-    JSON.stringify({
-      type: 'stdin',
-      data: text.endsWith('\n') ? text : `${text}\n`,
-    })
-  )
-
-  interactiveInput.value = ''
-}
-
 async function stopInteractiveRun() {
   try {
     if (!interactiveSessionId.value) {
-      cleanupInteractiveSocket()
+      resetInteractiveState()
+      terminalRef.value?.disconnect()
       return
     }
 
     await interactiveApi.stopSession(interactiveSessionId.value)
-    appendInteractiveOutput('\n[interactive] stop requested\n')
     interactiveStatus.value = 'Stopping...'
   } catch (error: any) {
     console.error('stopInteractiveRun error:', error)
@@ -488,24 +398,28 @@ async function stopInteractiveRun() {
 }
 
 function createNewProject() {
-  cleanupInteractiveSocket()
-  resetInteractiveConsole()
+  terminalRef.value?.disconnect()
+  terminalRef.value?.clearTerminal()
+  resetInteractiveState()
 
   currentProjectDocumentId.value = ''
   projectTitle.value = 'Untitled Code'
   stdinText.value = ''
+  interactiveMode.value = false
   resetEditorToTemplate()
 }
 
 function loadProject(item: CodeProjectDto) {
-  cleanupInteractiveSocket()
-  resetInteractiveConsole()
+  terminalRef.value?.disconnect()
+  terminalRef.value?.clearTerminal()
+  resetInteractiveState()
 
   currentProjectDocumentId.value = item.documentId
   projectTitle.value = item.title
   stdinText.value = item.stdin || ''
   runResult.value = null
   runError.value = ''
+  interactiveMode.value = false
 
   const matchedLanguage = safeLanguages.value.find(
     (lang) => lang.slug === item.language
@@ -592,8 +506,37 @@ async function deleteCurrentProject() {
   }
 }
 
+function onTerminalConnected() {
+  interactiveConnecting.value = false
+  interactiveRunning.value = true
+  interactiveStatus.value = 'Connected'
+}
+
+function onTerminalDisconnected() {
+  interactiveRunning.value = false
+  interactiveConnecting.value = false
+  interactiveStatus.value = 'Closed'
+}
+
+function onTerminalStatus(value: string) {
+  interactiveStatus.value = value
+}
+
+function onTerminalExit(code: number | null) {
+  interactiveRunning.value = false
+  interactiveConnecting.value = false
+  interactiveStatus.value = `Exited (${code ?? '—'})`
+}
+
+function onTerminalError(message: string) {
+  interactiveRunning.value = false
+  interactiveConnecting.value = false
+  interactiveStatus.value = 'Error'
+  showFeedback(message, 'error')
+}
+
 onBeforeUnmount(() => {
-  cleanupInteractiveSocket()
+  terminalRef.value?.disconnect()
 })
 </script>
 
@@ -650,9 +593,8 @@ onBeforeUnmount(() => {
             </div>
 
             <p class="text-body-1 text-medium-emphasis mb-0">
-              This build uses Monaco for the editor workspace, Judge0 for batch
-              execution, and a separate interactive runner for live stdin/stdout
-              sessions.
+              Use normal batch run for fast execution, or switch to interactive
+              mode for true terminal-style typing inside the console.
             </p>
           </div>
 
@@ -796,7 +738,7 @@ onBeforeUnmount(() => {
               <MonacoCodeEditor
                 v-model="sourceCode"
                 :language="selectedLanguage?.editorLanguage || 'plaintext'"
-                :height="560"
+                :height="520"
               />
 
               <template #fallback>
@@ -804,7 +746,7 @@ onBeforeUnmount(() => {
                   rounded="xl"
                   color="#0f172a"
                   class="d-flex align-center justify-center"
-                  style="height: 560px; color: white"
+                  style="height: 520px; color: white"
                 >
                   Loading editor...
                 </v-sheet>
@@ -819,24 +761,110 @@ onBeforeUnmount(() => {
               class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
             >
               <div>
-                <div class="text-h5 font-weight-bold">Program Output</div>
+                <div class="text-h5 font-weight-bold">Program Console</div>
                 <div class="text-body-2 text-medium-emphasis">
-                  Compiler messages, standard output, and errors appear here.
+                  Batch output and interactive terminal output appear here.
                 </div>
               </div>
 
-              <v-chip :color="resultColor" variant="tonal" rounded="pill">
-                {{
-                  runError
-                    ? 'Error'
-                    : runResult?.status_description || 'No Result Yet'
-                }}
-              </v-chip>
+              <div class="d-flex flex-wrap ga-2">
+                <v-chip
+                  :color="
+                    interactiveMode
+                      ? interactiveRunning
+                        ? 'success'
+                        : interactiveConnecting
+                          ? 'warning'
+                          : 'deep-purple'
+                      : resultColor
+                  "
+                  variant="tonal"
+                  rounded="pill"
+                >
+                  {{
+                    interactiveMode
+                      ? interactiveStatus
+                      : runError
+                        ? 'Error'
+                        : runResult?.status_description || 'No Result Yet'
+                  }}
+                </v-chip>
+
+                <v-chip
+                  v-if="interactiveMode"
+                  color="deep-purple-darken-1"
+                  variant="outlined"
+                  rounded="pill"
+                >
+                  Interactive Mode
+                </v-chip>
+              </div>
             </div>
 
-            <v-sheet rounded="xl" color="#0f172a" class="output-shell pa-4">
-              <pre class="output-pre">{{ outputText }}</pre>
-            </v-sheet>
+            <div v-if="!interactiveMode">
+              <v-textarea
+                v-model="stdinText"
+                label="Program Input (stdin)"
+                variant="outlined"
+                rounded="xl"
+                rows="4"
+                auto-grow
+                class="mb-4"
+              />
+
+              <v-sheet rounded="xl" color="#0f172a" class="output-shell pa-4">
+                <pre class="output-pre">{{ outputText }}</pre>
+              </v-sheet>
+            </div>
+
+            <div v-else>
+              <ClientOnly>
+                <InteractiveTerminal
+                  ref="terminalRef"
+                  :ws-url="interactiveWsUrl"
+                  :connect-on-mount="false"
+                  @connected="onTerminalConnected"
+                  @disconnected="onTerminalDisconnected"
+                  @status="onTerminalStatus"
+                  @exit="onTerminalExit"
+                  @error="onTerminalError"
+                />
+
+                <template #fallback>
+                  <v-sheet
+                    rounded="xl"
+                    color="#0f172a"
+                    class="d-flex align-center justify-center"
+                    style="height: 320px; color: white"
+                  >
+                    Loading interactive terminal...
+                  </v-sheet>
+                </template>
+              </ClientOnly>
+
+              <div class="d-flex flex-column flex-md-row ga-3 mt-4">
+                <v-btn
+                  color="error"
+                  variant="outlined"
+                  rounded="pill"
+                  prepend-icon="mdi-stop-circle-outline"
+                  :disabled="!interactiveRunning && !interactiveConnecting"
+                  @click="stopInteractiveRun"
+                >
+                  Stop Session
+                </v-btn>
+
+                <v-btn
+                  color="grey-darken-2"
+                  variant="outlined"
+                  rounded="pill"
+                  prepend-icon="mdi-broom"
+                  @click="terminalRef?.clearTerminal()"
+                >
+                  Clear Terminal
+                </v-btn>
+              </div>
+            </div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -846,7 +874,7 @@ onBeforeUnmount(() => {
           <v-card-text class="pa-5">
             <div class="text-h5 font-weight-bold mb-1">Run Configuration</div>
             <div class="text-body-2 text-medium-emphasis mb-4">
-              Choose language and optional input.
+              Choose language, then use either batch run or interactive mode.
             </div>
 
             <v-select
@@ -858,16 +886,6 @@ onBeforeUnmount(() => {
               item-title="name"
               item-value="id"
               :loading="languagesPending"
-              class="mb-4"
-            />
-
-            <v-textarea
-              v-model="stdinText"
-              label="Program Input (stdin)"
-              variant="outlined"
-              rounded="xl"
-              rows="6"
-              auto-grow
               class="mb-4"
             />
 
@@ -885,6 +903,17 @@ onBeforeUnmount(() => {
 
               <v-btn
                 block
+                color="deep-purple-darken-1"
+                rounded="pill"
+                prepend-icon="mdi-console"
+                :loading="interactiveConnecting"
+                @click="startInteractiveRun"
+              >
+                Interactive Run
+              </v-btn>
+
+              <v-btn
+                block
                 color="grey-darken-2"
                 variant="outlined"
                 rounded="pill"
@@ -892,92 +921,6 @@ onBeforeUnmount(() => {
                 @click="resetEditorToTemplate"
               >
                 Reset Editor
-              </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
-
-        <v-card rounded="xl" elevation="3" class="section-card mb-6">
-          <v-card-text class="pa-5">
-            <div
-              class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
-            >
-              <div>
-                <div class="text-h5 font-weight-bold">Interactive Console</div>
-                <div class="text-body-2 text-medium-emphasis">
-                  Start a live interactive session and send input while the
-                  program is running.
-                </div>
-              </div>
-
-              <v-chip
-                :color="
-                  interactiveRunning
-                    ? 'success'
-                    : interactiveConnecting
-                      ? 'warning'
-                      : 'grey'
-                "
-                variant="tonal"
-                rounded="pill"
-              >
-                {{ interactiveStatus }}
-              </v-chip>
-            </div>
-
-            <v-sheet
-              rounded="xl"
-              color="#0f172a"
-              class="output-shell pa-4 mb-4"
-            >
-              <pre class="output-pre">{{
-                interactiveOutput || 'Interactive output will appear here.'
-              }}</pre>
-            </v-sheet>
-
-            <v-text-field
-              v-model="interactiveInput"
-              label="Send Input"
-              variant="outlined"
-              rounded="xl"
-              density="comfortable"
-              class="mb-3"
-              @keyup.enter="sendInteractiveInput"
-            />
-
-            <div class="d-flex flex-column ga-3">
-              <v-btn
-                block
-                color="deep-purple-darken-1"
-                rounded="pill"
-                prepend-icon="mdi-send"
-                :disabled="!interactiveRunning"
-                @click="sendInteractiveInput"
-              >
-                Send Input
-              </v-btn>
-
-              <v-btn
-                block
-                color="error"
-                variant="outlined"
-                rounded="pill"
-                prepend-icon="mdi-stop-circle-outline"
-                :disabled="!interactiveRunning && !interactiveConnecting"
-                @click="stopInteractiveRun"
-              >
-                Stop Session
-              </v-btn>
-
-              <v-btn
-                block
-                color="grey-darken-2"
-                variant="outlined"
-                rounded="pill"
-                prepend-icon="mdi-broom"
-                @click="resetInteractiveConsole"
-              >
-                Clear Console
               </v-btn>
             </div>
           </v-card-text>
