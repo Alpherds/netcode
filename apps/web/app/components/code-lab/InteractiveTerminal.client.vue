@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -34,22 +34,13 @@ let inputBuffer = ''
 const isConnected = ref(false)
 const isConnecting = ref(false)
 
-function writeLine(text = '') {
-  if (!terminal) return
-  terminal.write(text.replace(/\n/g, '\r\n'))
-}
-
-function writePrompt() {
-  if (!terminal) return
-  terminal.write('\r\n> ')
-}
-
 function cleanupSocket() {
   if (ws) {
     try {
       ws.close()
     } catch {}
   }
+
   ws = null
   isConnected.value = false
   isConnecting.value = false
@@ -79,8 +70,8 @@ function connect() {
   if (!terminal) return
 
   isConnecting.value = true
+  inputBuffer = ''
   terminal.clear()
-  terminal.write('Connecting to interactive runner...\r\n')
 
   ws = new WebSocket(props.wsUrl)
 
@@ -89,8 +80,6 @@ function connect() {
     isConnected.value = true
     emit('connected')
     emit('status', 'Connected')
-    terminal?.write('[interactive] session connected\r\n')
-    terminal?.write('> ')
   }
 
   ws.onmessage = (event) => {
@@ -99,8 +88,6 @@ function connect() {
 
       if (payload.type === 'status') {
         emit('status', payload.data || 'Connected')
-        terminal?.write(`\r\n[status] ${payload.data || 'connected'}\r\n`)
-        terminal?.write('> ')
         return
       }
 
@@ -119,7 +106,6 @@ function connect() {
         emit('status', 'Error')
         emit('error', message)
         terminal?.write(`\r\n[error] ${message}\r\n`)
-        terminal?.write('> ')
         return
       }
 
@@ -146,7 +132,7 @@ function connect() {
     emit('disconnected')
     isConnected.value = false
     isConnecting.value = false
-    terminal?.write('\r\n[interactive] session closed\r\n')
+    terminal?.write('\r\n')
   }
 }
 
@@ -156,6 +142,7 @@ function disconnect() {
 
 function clearTerminal() {
   terminal?.clear()
+  inputBuffer = ''
 }
 
 function stopSession() {
@@ -204,24 +191,19 @@ onMounted(async () => {
   await nextTick()
   fitTerminal()
 
-  terminal.write('Interactive terminal ready.\r\n')
-
   terminal.onData((data) => {
     if (!terminal) return
 
     const code = data.charCodeAt(0)
 
     if (code === 13) {
-      // Enter
       const value = inputBuffer
       inputBuffer = ''
-      terminal.write('\r\n')
       sendInput(value)
       return
     }
 
     if (code === 127) {
-      // Backspace
       if (inputBuffer.length > 0) {
         inputBuffer = inputBuffer.slice(0, -1)
         terminal.write('\b \b')
@@ -241,16 +223,6 @@ onMounted(async () => {
     connect()
   }
 })
-
-// watch(
-//   () => props.wsUrl,
-//   async (value, oldValue) => {
-//     if (!value || value === oldValue) return
-//     await nextTick()
-//     fitTerminal()
-//     connect()
-//   }
-// )
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', fitTerminal)
