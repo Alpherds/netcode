@@ -242,15 +242,15 @@ onMounted(async () => {
   }
 })
 
-watch(
-  () => props.wsUrl,
-  async (value, oldValue) => {
-    if (!value || value === oldValue) return
-    await nextTick()
-    fitTerminal()
-    connect()
-  }
-)
+// watch(
+//   () => props.wsUrl,
+//   async (value, oldValue) => {
+//     if (!value || value === oldValue) return
+//     await nextTick()
+//     fitTerminal()
+//     connect()
+//   }
+// )
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', fitTerminal)

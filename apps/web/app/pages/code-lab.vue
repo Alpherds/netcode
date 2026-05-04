@@ -307,12 +307,10 @@ async function runCode() {
   }
 }
 
-function getInteractiveLanguage(): 'python' | 'cpp' | 'java' | null {
+function getInteractiveLanguage(): 'python' | null {
   const slug = selectedLanguage.value?.slug
 
   if (slug === 'python') return 'python'
-  if (slug === 'cpp') return 'cpp'
-  if (slug === 'java') return 'java'
 
   return null
 }
@@ -331,7 +329,7 @@ async function startInteractiveRun() {
 
     if (!language) {
       showFeedback(
-        'Interactive mode supports Python, C++, and Java only.',
+        'Interactive mode currently supports Python only.',
         'warning'
       )
       return
@@ -342,8 +340,9 @@ async function startInteractiveRun() {
       return
     }
 
-    interactiveMode.value = true
+    terminalRef.value?.disconnect()
     resetInteractiveState()
+
     interactiveConnecting.value = true
     interactiveStatus.value = 'Creating session...'
 
@@ -352,6 +351,7 @@ async function startInteractiveRun() {
       sourceCode: sourceCode.value,
     })
 
+    interactiveMode.value = true
     interactiveSessionId.value = response.sessionId
     interactiveWsUrl.value = response.wsUrl
     interactiveStatus.value = 'Connecting...'
@@ -360,11 +360,11 @@ async function startInteractiveRun() {
     terminalRef.value?.clearTerminal()
     terminalRef.value?.connect()
   } catch (error: any) {
-    interactiveConnecting.value = false
-    interactiveRunning.value = false
-    interactiveStatus.value = 'Failed'
-
     console.error('startInteractiveRun error:', error)
+
+    terminalRef.value?.disconnect()
+    resetInteractiveState()
+    interactiveMode.value = false
 
     showFeedback(
       error?.data?.message ||
