@@ -36,7 +36,6 @@ const {
   data: languages,
   pending: languagesPending,
   error: languagesError,
-  refresh: refreshLanguages,
 } = await useFetch<CodeLabLanguage[]>('/api/code-lab/languages')
 
 const selectedLanguageId = ref<number | null>(null)
@@ -112,6 +111,7 @@ watch(selectedLanguageId, (value, oldValue) => {
   sourceCode.value = language.template
   runResult.value = null
   runError.value = ''
+  interactiveMode.value = false
 })
 
 const outputText = computed(() => {
@@ -151,6 +151,9 @@ function resetEditorToTemplate() {
   sourceCode.value = selectedLanguage.value.template
   runResult.value = null
   runError.value = ''
+  interactiveMode.value = false
+  terminalRef.value?.disconnect()
+  terminalRef.value?.clearTerminal()
 }
 
 function buildProjectPayload(): SaveCodeProjectInput {
@@ -272,6 +275,9 @@ async function runCode() {
   runResult.value = null
   interactiveMode.value = false
 
+  terminalRef.value?.disconnect()
+  terminalRef.value?.clearTerminal()
+
   if (!selectedLanguageId.value) {
     runError.value = 'Please choose a language.'
     return
@@ -295,7 +301,6 @@ async function runCode() {
     })
 
     runResult.value = response
-
     await autosaveCurrentRunResult()
   } catch (error: any) {
     runError.value =
@@ -345,6 +350,8 @@ async function startInteractiveRun() {
 
     interactiveConnecting.value = true
     interactiveStatus.value = 'Creating session...'
+    runResult.value = null
+    runError.value = ''
 
     const response = await interactiveApi.createSession({
       language,
@@ -568,80 +575,32 @@ onBeforeUnmount(() => {
           </v-chip>
         </div>
 
-        <div
-          class="d-flex flex-column flex-lg-row justify-space-between align-start ga-6"
-        >
-          <div class="hero-copy">
-            <div class="text-overline text-primary font-weight-bold mb-2">
-              Learning Tools / Code Lab
-            </div>
-
-            <div class="text-h4 font-weight-bold mb-2">
-              Multi-Language Code Lab
-            </div>
-
-            <div class="d-flex flex-wrap ga-2 mb-4">
-              <v-chip color="primary" variant="outlined" rounded="pill">
-                C++
-              </v-chip>
-              <v-chip color="success" variant="outlined" rounded="pill">
-                Java
-              </v-chip>
-              <v-chip color="indigo" variant="outlined" rounded="pill">
-                Python
-              </v-chip>
-            </div>
-
-            <p class="text-body-1 text-medium-emphasis mb-0">
-              Use normal batch run for fast execution, or switch to interactive
-              mode for true terminal-style typing inside the console.
-            </p>
+        <div class="hero-copy">
+          <div class="text-overline text-primary font-weight-bold mb-2">
+            Learning Tools / Code Lab
           </div>
 
-          <div class="hero-action-stack d-flex flex-wrap ga-3 justify-end">
-            <v-btn
-              color="primary"
-              rounded="pill"
-              size="large"
-              prepend-icon="mdi-play-circle-outline"
-              :loading="isRunning"
-              @click="runCode"
-            >
-              Run Code
-            </v-btn>
-
-            <v-btn
-              color="deep-purple-darken-1"
-              rounded="pill"
-              size="large"
-              prepend-icon="mdi-console"
-              :loading="interactiveConnecting"
-              @click="startInteractiveRun"
-            >
-              Interactive Run
-            </v-btn>
-
-            <v-btn
-              color="teal-darken-1"
-              rounded="pill"
-              size="large"
-              prepend-icon="mdi-refresh"
-              @click="resetEditorToTemplate"
-            >
-              Reset Template
-            </v-btn>
-
-            <v-btn
-              color="grey-darken-2"
-              rounded="pill"
-              size="large"
-              prepend-icon="mdi-refresh-auto"
-              :disabled="languagesPending"
-              @click="refreshLanguages"
-            >
-              Refresh Languages
-            </v-btn>
+          <div class="text-h4 font-weight-bold mb-2">
+            Multi-Language Code Lab
           </div>
+
+          <div class="d-flex flex-wrap ga-2 mb-4">
+            <v-chip color="primary" variant="outlined" rounded="pill">
+              C++
+            </v-chip>
+            <v-chip color="success" variant="outlined" rounded="pill">
+              Java
+            </v-chip>
+            <v-chip color="indigo" variant="outlined" rounded="pill">
+              Python
+            </v-chip>
+          </div>
+
+          <p class="text-body-1 text-medium-emphasis mb-0">
+            Use the editor on the left and the program console on the right.
+            Batch run and interactive terminal mode are both available from the
+            editor toolbar.
+          </p>
         </div>
 
         <v-alert
@@ -659,9 +618,9 @@ onBeforeUnmount(() => {
       </v-card-text>
     </v-card>
 
-    <v-row dense>
+    <v-row dense align="stretch">
       <v-col cols="12" lg="8">
-        <v-card rounded="xl" elevation="3" class="section-card mb-6">
+        <v-card rounded="xl" elevation="3" class="section-card editor-card h-100">
           <v-card-text class="pa-5">
             <div
               class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
@@ -669,16 +628,12 @@ onBeforeUnmount(() => {
               <div>
                 <div class="text-h5 font-weight-bold">Editor Workspace</div>
                 <div class="text-body-2 text-medium-emphasis">
-                  Write and run code from the selected language.
+                  Write and manage your code here.
                 </div>
               </div>
-
-              <v-chip color="primary" variant="tonal" rounded="pill">
-                {{ selectedLanguage?.name || 'No language selected' }}
-              </v-chip>
             </div>
 
-            <v-row dense class="mt-4 mb-4">
+            <v-row dense class="mt-2 mb-4">
               <v-col cols="12" md="4">
                 <v-text-field
                   v-model="projectTitle"
@@ -690,11 +645,43 @@ onBeforeUnmount(() => {
                 />
               </v-col>
 
+              <v-col cols="12" md="3">
+                <v-select
+                  v-model="selectedLanguageId"
+                  label="Language"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details
+                  :items="safeLanguages"
+                  item-title="name"
+                  item-value="id"
+                  :loading="languagesPending"
+                />
+              </v-col>
+
               <v-col
                 cols="12"
-                md="8"
+                md="5"
                 class="d-flex flex-wrap justify-end ga-2"
               >
+                <v-btn
+                  color="primary"
+                  prepend-icon="mdi-play"
+                  :loading="isRunning"
+                  @click="runCode"
+                >
+                  Run
+                </v-btn>
+
+                <v-btn
+                  color="deep-purple-darken-1"
+                  prepend-icon="mdi-console"
+                  :loading="interactiveConnecting"
+                  @click="startInteractiveRun"
+                >
+                  Interactive Run
+                </v-btn>
+
                 <v-btn
                   variant="outlined"
                   prepend-icon="mdi-file-plus-outline"
@@ -709,7 +696,7 @@ onBeforeUnmount(() => {
                   prepend-icon="mdi-content-save-outline"
                   @click="saveProject"
                 >
-                  {{ currentProjectDocumentId ? 'Update Save' : 'Save' }}
+                  Save
                 </v-btn>
 
                 <v-btn
@@ -719,6 +706,14 @@ onBeforeUnmount(() => {
                   @click="openSavedProjects"
                 >
                   My Saved Codes
+                </v-btn>
+
+                <v-btn
+                  variant="outlined"
+                  prepend-icon="mdi-refresh"
+                  @click="resetEditorToTemplate"
+                >
+                  Reset
                 </v-btn>
 
                 <v-btn
@@ -738,7 +733,7 @@ onBeforeUnmount(() => {
               <MonacoCodeEditor
                 v-model="sourceCode"
                 :language="selectedLanguage?.editorLanguage || 'plaintext'"
-                :height="520"
+                :height="620"
               />
 
               <template #fallback>
@@ -746,7 +741,7 @@ onBeforeUnmount(() => {
                   rounded="xl"
                   color="#0f172a"
                   class="d-flex align-center justify-center"
-                  style="height: 520px; color: white"
+                  style="height: 620px; color: white"
                 >
                   Loading editor...
                 </v-sheet>
@@ -754,9 +749,11 @@ onBeforeUnmount(() => {
             </ClientOnly>
           </v-card-text>
         </v-card>
+      </v-col>
 
-        <v-card rounded="xl" elevation="3" class="section-card">
-          <v-card-text class="pa-5">
+      <v-col cols="12" lg="4">
+        <v-card rounded="xl" elevation="3" class="section-card console-card h-100">
+          <v-card-text class="pa-5 d-flex flex-column fill-height">
             <div
               class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4"
             >
@@ -786,7 +783,7 @@ onBeforeUnmount(() => {
                       ? interactiveStatus
                       : runError
                         ? 'Error'
-                        : runResult?.status_description || 'No Result Yet'
+                        : runResult?.status_description || 'Idle'
                   }}
                 </v-chip>
 
@@ -801,183 +798,64 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div v-if="!interactiveMode">
-              <v-textarea
-                v-model="stdinText"
-                label="Program Input (stdin)"
-                variant="outlined"
-                rounded="xl"
-                rows="4"
-                auto-grow
-                class="mb-4"
-              />
+            <div class="console-body flex-grow-1">
+              <div v-if="!interactiveMode" class="h-100">
+                <v-sheet rounded="xl" color="#0f172a" class="output-shell pa-4 h-100">
+                  <pre class="output-pre">{{ outputText }}</pre>
+                </v-sheet>
+              </div>
 
-              <v-sheet rounded="xl" color="#0f172a" class="output-shell pa-4">
-                <pre class="output-pre">{{ outputText }}</pre>
-              </v-sheet>
-            </div>
+              <div v-else class="console-terminal h-100">
+                <ClientOnly>
+                  <InteractiveTerminal
+                    ref="terminalRef"
+                    :ws-url="interactiveWsUrl"
+                    :connect-on-mount="false"
+                    @connected="onTerminalConnected"
+                    @disconnected="onTerminalDisconnected"
+                    @status="onTerminalStatus"
+                    @exit="onTerminalExit"
+                    @error="onTerminalError"
+                  />
 
-            <div v-else>
-              <ClientOnly>
-                <InteractiveTerminal
-                  ref="terminalRef"
-                  :ws-url="interactiveWsUrl"
-                  :connect-on-mount="false"
-                  @connected="onTerminalConnected"
-                  @disconnected="onTerminalDisconnected"
-                  @status="onTerminalStatus"
-                  @exit="onTerminalExit"
-                  @error="onTerminalError"
-                />
-
-                <template #fallback>
-                  <v-sheet
-                    rounded="xl"
-                    color="#0f172a"
-                    class="d-flex align-center justify-center"
-                    style="height: 320px; color: white"
-                  >
-                    Loading interactive terminal...
-                  </v-sheet>
-                </template>
-              </ClientOnly>
-
-              <div class="d-flex flex-column flex-md-row ga-3 mt-4">
-                <v-btn
-                  color="error"
-                  variant="outlined"
-                  rounded="pill"
-                  prepend-icon="mdi-stop-circle-outline"
-                  :disabled="!interactiveRunning && !interactiveConnecting"
-                  @click="stopInteractiveRun"
-                >
-                  Stop Session
-                </v-btn>
-
-                <v-btn
-                  color="grey-darken-2"
-                  variant="outlined"
-                  rounded="pill"
-                  prepend-icon="mdi-broom"
-                  @click="terminalRef?.clearTerminal()"
-                >
-                  Clear Terminal
-                </v-btn>
+                  <template #fallback>
+                    <v-sheet
+                      rounded="xl"
+                      color="#0f172a"
+                      class="d-flex align-center justify-center h-100"
+                      style="min-height: 620px; color: white"
+                    >
+                      Loading interactive terminal...
+                    </v-sheet>
+                  </template>
+                </ClientOnly>
               </div>
             </div>
-          </v-card-text>
-        </v-card>
-      </v-col>
 
-      <v-col cols="12" lg="4">
-        <v-card rounded="xl" elevation="3" class="section-card mb-6">
-          <v-card-text class="pa-5">
-            <div class="text-h5 font-weight-bold mb-1">Run Configuration</div>
-            <div class="text-body-2 text-medium-emphasis mb-4">
-              Choose language, then use either batch run or interactive mode.
-            </div>
-
-            <v-select
-              v-model="selectedLanguageId"
-              label="Language"
-              variant="outlined"
-              rounded="xl"
-              :items="safeLanguages"
-              item-title="name"
-              item-value="id"
-              :loading="languagesPending"
-              class="mb-4"
-            />
-
-            <div class="d-flex flex-column ga-3">
+            <div
+              v-if="interactiveMode"
+              class="d-flex flex-column flex-md-row ga-3 mt-4"
+            >
               <v-btn
-                block
-                color="primary"
+                color="error"
+                variant="outlined"
                 rounded="pill"
-                prepend-icon="mdi-play"
-                :loading="isRunning"
-                @click="runCode"
+                prepend-icon="mdi-stop-circle-outline"
+                :disabled="!interactiveRunning && !interactiveConnecting"
+                @click="stopInteractiveRun"
               >
-                Run
+                Stop Session
               </v-btn>
 
               <v-btn
-                block
-                color="deep-purple-darken-1"
-                rounded="pill"
-                prepend-icon="mdi-console"
-                :loading="interactiveConnecting"
-                @click="startInteractiveRun"
-              >
-                Interactive Run
-              </v-btn>
-
-              <v-btn
-                block
                 color="grey-darken-2"
                 variant="outlined"
                 rounded="pill"
-                prepend-icon="mdi-refresh"
-                @click="resetEditorToTemplate"
+                prepend-icon="mdi-broom"
+                @click="terminalRef?.clearTerminal()"
               >
-                Reset Editor
+                Clear Terminal
               </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
-
-        <v-card rounded="xl" elevation="3" class="section-card">
-          <v-card-text class="pa-5">
-            <div class="text-h6 font-weight-bold mb-3">Execution Summary</div>
-
-            <div class="d-flex flex-wrap ga-3">
-              <v-sheet
-                rounded="xl"
-                color="primary"
-                variant="tonal"
-                class="summary-box pa-4"
-              >
-                <div class="text-overline">Language</div>
-                <div class="text-body-1 font-weight-bold">
-                  {{ selectedLanguage?.slug?.toUpperCase() || '—' }}
-                </div>
-              </v-sheet>
-
-              <v-sheet
-                rounded="xl"
-                color="success"
-                variant="tonal"
-                class="summary-box pa-4"
-              >
-                <div class="text-overline">Time</div>
-                <div class="text-body-1 font-weight-bold">
-                  {{ runResult?.time ?? '—' }}
-                </div>
-              </v-sheet>
-
-              <v-sheet
-                rounded="xl"
-                color="indigo"
-                variant="tonal"
-                class="summary-box pa-4"
-              >
-                <div class="text-overline">Memory</div>
-                <div class="text-body-1 font-weight-bold">
-                  {{ runResult?.memory ?? '—' }}
-                </div>
-              </v-sheet>
-
-              <v-sheet
-                rounded="xl"
-                color="warning"
-                variant="tonal"
-                class="summary-box pa-4"
-              >
-                <div class="text-overline">Exit Code</div>
-                <div class="text-body-1 font-weight-bold">
-                  {{ runResult?.exit_code ?? '—' }}
-                </div>
-              </v-sheet>
             </div>
           </v-card-text>
         </v-card>
@@ -1099,19 +977,20 @@ onBeforeUnmount(() => {
 }
 
 .hero-copy {
-  max-width: 760px;
+  max-width: 860px;
 }
 
-.hero-action-stack {
-  min-width: 320px;
+.editor-card,
+.console-card {
+  min-height: 100%;
 }
 
-.summary-box {
-  min-width: 140px;
+.console-body {
+  min-height: 620px;
 }
 
 .output-shell {
-  min-height: 280px;
+  min-height: 620px;
   overflow: auto;
 }
 
@@ -1131,19 +1010,32 @@ onBeforeUnmount(() => {
   color: #e5e7eb;
 }
 
+.console-terminal :deep(.terminal-wrapper) {
+  min-height: 620px;
+}
+
+.console-terminal :deep(.terminal-container) {
+  height: 620px;
+  width: 100%;
+}
+
+@media (max-width: 1280px) {
+  .console-body,
+  .output-shell,
+  .console-terminal :deep(.terminal-wrapper),
+  .console-terminal :deep(.terminal-container) {
+    min-height: 420px;
+    height: 420px;
+  }
+}
+
 @media (max-width: 960px) {
-  .hero-action-stack {
-    min-width: unset;
-    width: 100%;
-    justify-content: stretch;
-  }
-
-  .hero-action-stack :deep(.v-btn) {
-    flex: 1 1 100%;
-  }
-
-  .summary-box {
-    min-width: calc(50% - 12px);
+  .console-body,
+  .output-shell,
+  .console-terminal :deep(.terminal-wrapper),
+  .console-terminal :deep(.terminal-container) {
+    min-height: 320px;
+    height: 320px;
   }
 }
 </style>
