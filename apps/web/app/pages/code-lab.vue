@@ -312,10 +312,12 @@ async function runCode() {
   }
 }
 
-function getInteractiveLanguage(): 'python' | null {
+function getInteractiveLanguage(): 'python' | 'cpp' | 'java' | null {
   const slug = selectedLanguage.value?.slug
 
   if (slug === 'python') return 'python'
+  if (slug === 'cpp') return 'cpp'
+  if (slug === 'java') return 'java'
 
   return null
 }
