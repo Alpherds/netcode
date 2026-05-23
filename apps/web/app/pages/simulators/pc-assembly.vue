@@ -309,25 +309,27 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="hero-action-stack d-flex flex-wrap ga-3 justify-end">
-            <v-btn
-              color="primary"
-              rounded="pill"
-              size="large"
-              prepend-icon="mdi-desktop-tower-monitor"
-              @click="setAssemblyMode"
-            >
-              Assembly Mode
-            </v-btn>
+    <v-btn
+  color="primary"
+  rounded="pill"
+  size="large"
+  prepend-icon="mdi-desktop-tower-monitor"
+  :disabled="currentMode === 'Disassembly' && !isComplete"
+  @click="setAssemblyMode"
+>
+  Assembly Mode
+</v-btn>
 
-            <v-btn
-              color="deep-purple-darken-1"
-              rounded="pill"
-              size="large"
-              prepend-icon="mdi-tools"
-              @click="setDisassemblyMode"
-            >
-              Disassembly Mode
-            </v-btn>
+<v-btn
+  color="deep-purple-darken-1"
+  rounded="pill"
+  size="large"
+  prepend-icon="mdi-tools"
+  :disabled="currentMode === 'Assembly' && !isComplete"
+  @click="setDisassemblyMode"
+>
+  Disassembly Mode
+</v-btn>
           </div>
         </div>
 
@@ -396,25 +398,27 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="d-flex flex-wrap ga-2 action-cluster">
-                <v-btn
-                  color="primary"
-                  variant="tonal"
-                  rounded="pill"
-                  prepend-icon="mdi-desktop-tower-monitor"
-                  @click="setAssemblyMode"
-                >
-                  Assembly
-                </v-btn>
+      <v-btn
+  color="primary"
+  variant="tonal"
+  rounded="pill"
+  prepend-icon="mdi-desktop-tower-monitor"
+  :disabled="currentMode === 'Disassembly' && !isComplete"
+  @click="setAssemblyMode"
+>
+  Assembly
+</v-btn>
 
-                <v-btn
-                  color="deep-purple-darken-1"
-                  variant="outlined"
-                  rounded="pill"
-                  prepend-icon="mdi-tools"
-                  @click="setDisassemblyMode"
-                >
-                  Disassembly
-                </v-btn>
+<v-btn
+  color="deep-purple-darken-1"
+  variant="outlined"
+  rounded="pill"
+  prepend-icon="mdi-tools"
+  :disabled="currentMode === 'Assembly' && !isComplete"
+  @click="setDisassemblyMode"
+>
+  Disassembly
+</v-btn>
               </div>
             </div>
           </v-card-text>
