@@ -149,6 +149,18 @@ const isComplete = computed(() => {
   return currentStep.value >= currentSteps.value.length
 })
 
+const isAssemblyButtonDisabled = computed(() => {
+  if (!isComplete.value) return true
+
+  return currentMode.value === 'Assembly'
+})
+
+const isDisassemblyButtonDisabled = computed(() => {
+  if (!isComplete.value) return true
+
+  return currentMode.value === 'Disassembly'
+})
+
 const currentStepData = computed<StepItem>(() => {
   if (isComplete.value) {
     return {
@@ -201,6 +213,8 @@ function sendToUnity(methodName: string) {
 }
 
 function setAssemblyMode() {
+  if (isAssemblyButtonDisabled.value) return
+
   currentMode.value = 'Assembly'
   currentStep.value = 0
   currentPartId.value = 'motherboard'
@@ -210,6 +224,8 @@ function setAssemblyMode() {
 }
 
 function setDisassemblyMode() {
+  if (isDisassemblyButtonDisabled.value) return
+
   currentMode.value = 'Disassembly'
   currentStep.value = 0
   currentPartId.value = 'gpu'
@@ -217,7 +233,6 @@ function setDisassemblyMode() {
   warningText.value = ''
   sendToUnity('SetDisassemblyModeFromWeb')
 }
-
 function handleUnityMessage(event: MessageEvent) {
   const data = event.data
 
@@ -309,12 +324,12 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="hero-action-stack d-flex flex-wrap ga-3 justify-end">
-    <v-btn
+<v-btn
   color="primary"
   rounded="pill"
   size="large"
   prepend-icon="mdi-desktop-tower-monitor"
-  :disabled="currentMode === 'Disassembly' && !isComplete"
+  :disabled="isAssemblyButtonDisabled"
   @click="setAssemblyMode"
 >
   Assembly Mode
@@ -325,7 +340,7 @@ onBeforeUnmount(() => {
   rounded="pill"
   size="large"
   prepend-icon="mdi-tools"
-  :disabled="currentMode === 'Assembly' && !isComplete"
+  :disabled="isDisassemblyButtonDisabled"
   @click="setDisassemblyMode"
 >
   Disassembly Mode
@@ -398,12 +413,12 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="d-flex flex-wrap ga-2 action-cluster">
-      <v-btn
+<v-btn
   color="primary"
   variant="tonal"
   rounded="pill"
   prepend-icon="mdi-desktop-tower-monitor"
-  :disabled="currentMode === 'Disassembly' && !isComplete"
+  :disabled="isAssemblyButtonDisabled"
   @click="setAssemblyMode"
 >
   Assembly
@@ -414,7 +429,7 @@ onBeforeUnmount(() => {
   variant="outlined"
   rounded="pill"
   prepend-icon="mdi-tools"
-  :disabled="currentMode === 'Assembly' && !isComplete"
+  :disabled="isDisassemblyButtonDisabled"
   @click="setDisassemblyMode"
 >
   Disassembly
@@ -473,38 +488,50 @@ onBeforeUnmount(() => {
               </div>
             </v-sheet>
 
-            <div class="d-flex flex-column ga-3">
-              <v-card
-                v-for="(step, index) in currentSteps"
-                :key="`${currentMode}-${step.title}`"
-                rounded="xl"
-                :elevation="index === currentStep && !isComplete ? 3 : 0"
-                :class="[
-                  'step-card',
-                  { 'step-card-active': index === currentStep && !isComplete }
-                ]"
-              >
-                <v-card-text class="pa-4 d-flex ga-3 align-start">
-                  <v-avatar
-                    :color="index === currentStep && !isComplete ? 'primary' : 'grey-lighten-1'"
-                    size="38"
-                  >
-                    <span class="text-body-2 font-weight-bold">
-                      {{ index + 1 }}
-                    </span>
-                  </v-avatar>
+<div class="steps-compact-list d-flex flex-column ga-2">
+  <v-card
+    v-for="(step, index) in currentSteps"
+    :key="`${currentMode}-${step.title}`"
+    rounded="xl"
+    :elevation="index === currentStep && !isComplete ? 3 : 0"
+    :class="[
+      'step-card',
+      { 'step-card-active': index === currentStep && !isComplete }
+    ]"
+  >
+    <v-card-text class="pa-3 d-flex ga-3 align-center">
+      <v-avatar
+        :color="index === currentStep && !isComplete ? 'primary' : 'grey-lighten-1'"
+        size="32"
+      >
+        <span class="text-body-2 font-weight-bold">
+          {{ index + 1 }}
+        </span>
+      </v-avatar>
 
-                  <div class="flex-grow-1">
-                    <div class="font-weight-bold mb-1">
-                      {{ step.title }}
-                    </div>
-                    <div class="text-body-2 text-medium-emphasis">
-                      {{ step.description }}
-                    </div>
-                  </div>
-                </v-card-text>
-              </v-card>
-            </div>
+      <div class="flex-grow-1">
+        <div class="font-weight-bold text-body-2">
+          {{ step.title }}
+        </div>
+
+        <div
+          v-if="index === currentStep && !isComplete"
+          class="text-caption text-medium-emphasis mt-1"
+        >
+          {{ step.description }}
+        </div>
+      </div>
+
+      <v-icon
+        v-if="index < currentStep || isComplete"
+        color="success"
+        size="20"
+      >
+        mdi-check-circle
+      </v-icon>
+    </v-card-text>
+  </v-card>
+</div>
           </v-card-text>
         </v-card>
 
@@ -613,6 +640,30 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.steps-compact-list {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.steps-compact-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.steps-compact-list::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.35);
+  border-radius: 999px;
+}
+
+.step-card :deep(.v-card-text) {
+  min-height: 64px;
+}
+
+.step-card-active {
+  border-color: rgba(37, 99, 235, 0.22);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
 @media (max-width: 960px) {
   .hero-action-stack {
     min-width: unset;
@@ -639,5 +690,7 @@ onBeforeUnmount(() => {
   .summary-box {
     min-width: calc(50% - 12px);
   }
+
+  
 }
 </style>
