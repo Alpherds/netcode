@@ -272,6 +272,10 @@ const goToRj45Simulator = async () => {
   await navigateTo('/simulators/rj45')
 }
 
+const goToPcAssemblySimulator = async () => {
+  await navigateTo('/simulators/pc-assembly')
+}
+
 const startAutoRefresh = () => {
   if (refreshTimer) return
 
@@ -797,6 +801,52 @@ const classroomStatusLabel = (status?: string | null) => {
         rounded="pill"
         prepend-icon="mdi-open-in-new"
         @click="goToRj45Simulator"
+      >
+        Open Simulator
+      </v-btn>
+    </div>
+  </v-card-text>
+</v-card>
+
+<v-card
+  rounded="xl"
+  variant="tonal"
+  color="deep-purple-darken-1"
+  class="tool-card"
+>
+  <v-card-text class="pa-5 d-flex flex-column justify-space-between h-100">
+    <div class="d-flex align-start justify-space-between ga-3">
+      <div class="d-flex ga-3">
+        <v-avatar color="deep-purple-darken-1" size="48">
+          <v-icon>mdi-desktop-tower-monitor</v-icon>
+        </v-avatar>
+
+        <div>
+          <div class="text-h6 font-weight-bold">
+            PC Assembly Simulator
+          </div>
+          <div class="text-medium-emphasis">
+            3D assembly and disassembly
+          </div>
+        </div>
+      </div>
+
+      <v-chip size="small" variant="outlined">
+        Available
+      </v-chip>
+    </div>
+
+    <div class="text-medium-emphasis mt-6 mb-4">
+      Practice installing the motherboard, CPU, cooler, RAM, PSU, power cable,
+      storage drive, and GPU using an interactive 3D simulator.
+    </div>
+
+    <div class="d-flex">
+      <v-btn
+        color="primary"
+        rounded="pill"
+        prepend-icon="mdi-open-in-new"
+        @click="goToPcAssemblySimulator"
       >
         Open Simulator
       </v-btn>
