@@ -149,16 +149,36 @@ const isComplete = computed(() => {
   return currentStep.value >= currentSteps.value.length
 })
 
-const isAssemblyButtonDisabled = computed(() => {
-  if (!isComplete.value) return true
+const hasStartedCurrentMode = computed(() => {
+  return currentStep.value > 0 && !isComplete.value
+})
 
-  return currentMode.value === 'Assembly'
+const isAssemblyButtonDisabled = computed(() => {
+  if (hasStartedCurrentMode.value) return true
+
+  if (currentMode.value === 'Assembly') {
+    return isComplete.value
+  }
+
+  if (currentMode.value === 'Disassembly') {
+    return !isComplete.value
+  }
+
+  return false
 })
 
 const isDisassemblyButtonDisabled = computed(() => {
-  if (!isComplete.value) return true
+  if (hasStartedCurrentMode.value) return true
 
-  return currentMode.value === 'Disassembly'
+  if (currentMode.value === 'Disassembly') {
+    return isComplete.value
+  }
+
+  if (currentMode.value === 'Assembly') {
+    return !isComplete.value
+  }
+
+  return false
 })
 
 const currentStepData = computed<StepItem>(() => {
@@ -200,6 +220,7 @@ async function goBack() {
 
 function sendToUnity(methodName: string) {
   const frameWindow = unityFrame.value?.contentWindow
+
   if (!frameWindow) return
 
   frameWindow.postMessage(
@@ -220,6 +241,7 @@ function setAssemblyMode() {
   currentPartId.value = 'motherboard'
   currentStepText.value = 'Step 1: Install the motherboard.'
   warningText.value = ''
+
   sendToUnity('SetAssemblyModeFromWeb')
 }
 
@@ -231,8 +253,10 @@ function setDisassemblyMode() {
   currentPartId.value = 'gpu'
   currentStepText.value = 'Step 1: Remove the GPU.'
   warningText.value = ''
+
   sendToUnity('SetDisassemblyModeFromWeb')
 }
+
 function handleUnityMessage(event: MessageEvent) {
   const data = event.data
 
@@ -324,27 +348,27 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="hero-action-stack d-flex flex-wrap ga-3 justify-end">
-<v-btn
-  color="primary"
-  rounded="pill"
-  size="large"
-  prepend-icon="mdi-desktop-tower-monitor"
-  :disabled="isAssemblyButtonDisabled"
-  @click="setAssemblyMode"
->
-  Assembly Mode
-</v-btn>
+            <v-btn
+              color="primary"
+              rounded="pill"
+              size="large"
+              prepend-icon="mdi-desktop-tower-monitor"
+              :disabled="isAssemblyButtonDisabled"
+              @click="setAssemblyMode"
+            >
+              Assembly Mode
+            </v-btn>
 
-<v-btn
-  color="deep-purple-darken-1"
-  rounded="pill"
-  size="large"
-  prepend-icon="mdi-tools"
-  :disabled="isDisassemblyButtonDisabled"
-  @click="setDisassemblyMode"
->
-  Disassembly Mode
-</v-btn>
+            <v-btn
+              color="deep-purple-darken-1"
+              rounded="pill"
+              size="large"
+              prepend-icon="mdi-tools"
+              :disabled="isDisassemblyButtonDisabled"
+              @click="setDisassemblyMode"
+            >
+              Disassembly Mode
+            </v-btn>
           </div>
         </div>
 
@@ -375,7 +399,9 @@ onBeforeUnmount(() => {
           <v-card-text class="pa-5">
             <div class="d-flex flex-column flex-md-row justify-space-between align-start ga-3 mb-4">
               <div>
-                <div class="text-h5 font-weight-bold">Simulator Workspace</div>
+                <div class="text-h5 font-weight-bold">
+                  Simulator Workspace
+                </div>
                 <div class="text-body-2 text-medium-emphasis">
                   Interactive 3D workspace powered by Unity WebGL.
                 </div>
@@ -413,27 +439,27 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="d-flex flex-wrap ga-2 action-cluster">
-<v-btn
-  color="primary"
-  variant="tonal"
-  rounded="pill"
-  prepend-icon="mdi-desktop-tower-monitor"
-  :disabled="isAssemblyButtonDisabled"
-  @click="setAssemblyMode"
->
-  Assembly
-</v-btn>
+                <v-btn
+                  color="primary"
+                  variant="tonal"
+                  rounded="pill"
+                  prepend-icon="mdi-desktop-tower-monitor"
+                  :disabled="isAssemblyButtonDisabled"
+                  @click="setAssemblyMode"
+                >
+                  Assembly
+                </v-btn>
 
-<v-btn
-  color="deep-purple-darken-1"
-  variant="outlined"
-  rounded="pill"
-  prepend-icon="mdi-tools"
-  :disabled="isDisassemblyButtonDisabled"
-  @click="setDisassemblyMode"
->
-  Disassembly
-</v-btn>
+                <v-btn
+                  color="deep-purple-darken-1"
+                  variant="outlined"
+                  rounded="pill"
+                  prepend-icon="mdi-tools"
+                  :disabled="isDisassemblyButtonDisabled"
+                  @click="setDisassemblyMode"
+                >
+                  Disassembly
+                </v-btn>
               </div>
             </div>
           </v-card-text>
@@ -445,7 +471,9 @@ onBeforeUnmount(() => {
           <v-card-text class="pa-5">
             <div class="d-flex justify-space-between align-start ga-3 mb-4">
               <div>
-                <div class="text-h5 font-weight-bold">Procedure Guide</div>
+                <div class="text-h5 font-weight-bold">
+                  Procedure Guide
+                </div>
                 <div class="text-body-2 text-medium-emphasis">
                   Follow the current simulator step.
                 </div>
@@ -460,10 +488,15 @@ onBeforeUnmount(() => {
               </v-chip>
             </div>
 
-            <v-sheet rounded="xl" color="surface-variant" class="pa-4 mb-4 current-step-box">
+            <v-sheet
+              rounded="xl"
+              color="surface-variant"
+              class="pa-4 mb-4 current-step-box"
+            >
               <div class="text-overline text-primary font-weight-bold mb-1">
                 Current Step
               </div>
+
               <div class="text-h6 font-weight-bold mb-2">
                 {{
                   isComplete
@@ -471,92 +504,128 @@ onBeforeUnmount(() => {
                     : `${currentStep + 1}. ${currentStepData.title}`
                 }}
               </div>
+
               <div class="text-body-2 text-medium-emphasis">
                 {{ currentStepData.description }}
               </div>
             </v-sheet>
 
-            <v-sheet rounded="xl" color="surface-variant" class="pa-4 mb-4 current-step-box">
+            <v-sheet
+              rounded="xl"
+              color="surface-variant"
+              class="pa-4 mb-4 current-step-box"
+            >
               <div class="text-overline text-primary font-weight-bold mb-1">
                 Current Part
               </div>
+
               <div class="text-h6 font-weight-bold mb-2">
                 {{ currentPart.name }}
               </div>
+
               <div class="text-body-2 text-medium-emphasis">
                 {{ currentPart.meaning }}
               </div>
             </v-sheet>
 
-<div class="steps-compact-list d-flex flex-column ga-2">
-  <v-card
-    v-for="(step, index) in currentSteps"
-    :key="`${currentMode}-${step.title}`"
-    rounded="xl"
-    :elevation="index === currentStep && !isComplete ? 3 : 0"
-    :class="[
-      'step-card',
-      { 'step-card-active': index === currentStep && !isComplete }
-    ]"
-  >
-    <v-card-text class="pa-3 d-flex ga-3 align-center">
-      <v-avatar
-        :color="index === currentStep && !isComplete ? 'primary' : 'grey-lighten-1'"
-        size="32"
-      >
-        <span class="text-body-2 font-weight-bold">
-          {{ index + 1 }}
-        </span>
-      </v-avatar>
+            <div class="steps-compact-list d-flex flex-column ga-2">
+              <v-card
+                v-for="(step, index) in currentSteps"
+                :key="`${currentMode}-${step.title}`"
+                rounded="xl"
+                :elevation="index === currentStep && !isComplete ? 3 : 0"
+                :class="[
+                  'step-card',
+                  { 'step-card-active': index === currentStep && !isComplete }
+                ]"
+              >
+                <v-card-text class="pa-3 d-flex ga-3 align-center">
+                  <v-avatar
+                    :color="index === currentStep && !isComplete ? 'primary' : 'grey-lighten-1'"
+                    size="32"
+                  >
+                    <span class="text-body-2 font-weight-bold">
+                      {{ index + 1 }}
+                    </span>
+                  </v-avatar>
 
-      <div class="flex-grow-1">
-        <div class="font-weight-bold text-body-2">
-          {{ step.title }}
-        </div>
+                  <div class="flex-grow-1">
+                    <div class="font-weight-bold text-body-2">
+                      {{ step.title }}
+                    </div>
 
-        <div
-          v-if="index === currentStep && !isComplete"
-          class="text-caption text-medium-emphasis mt-1"
-        >
-          {{ step.description }}
-        </div>
-      </div>
+                    <div
+                      v-if="index === currentStep && !isComplete"
+                      class="text-caption text-medium-emphasis mt-1"
+                    >
+                      {{ step.description }}
+                    </div>
+                  </div>
 
-      <v-icon
-        v-if="index < currentStep || isComplete"
-        color="success"
-        size="20"
-      >
-        mdi-check-circle
-      </v-icon>
-    </v-card-text>
-  </v-card>
-</div>
+                  <v-icon
+                    v-if="index < currentStep || isComplete"
+                    color="success"
+                    size="20"
+                  >
+                    mdi-check-circle
+                  </v-icon>
+                </v-card-text>
+              </v-card>
+            </div>
           </v-card-text>
         </v-card>
 
         <v-card rounded="xl" elevation="3" class="section-card">
           <v-card-text class="pa-5">
-            <div class="text-h6 font-weight-bold mb-3">Module Notes</div>
+            <div class="text-h6 font-weight-bold mb-3">
+              Module Notes
+            </div>
 
             <v-alert type="success" variant="tonal" class="mb-3">
               This simulator checks the correct order and slot placement of PC components.
             </v-alert>
 
             <div class="d-flex flex-wrap ga-3">
-              <v-sheet rounded="xl" color="success" variant="tonal" class="summary-box pa-4">
-                <div class="text-overline">Procedure</div>
-                <div class="text-h6 font-weight-bold">8 Steps</div>
+              <v-sheet
+                rounded="xl"
+                color="success"
+                variant="tonal"
+                class="summary-box pa-4"
+              >
+                <div class="text-overline">
+                  Procedure
+                </div>
+                <div class="text-h6 font-weight-bold">
+                  8 Steps
+                </div>
               </v-sheet>
 
-              <v-sheet rounded="xl" color="info" variant="tonal" class="summary-box pa-4">
-                <div class="text-overline">Mode</div>
-                <div class="text-h6 font-weight-bold">{{ currentMode }}</div>
+              <v-sheet
+                rounded="xl"
+                color="info"
+                variant="tonal"
+                class="summary-box pa-4"
+              >
+                <div class="text-overline">
+                  Mode
+                </div>
+                <div class="text-h6 font-weight-bold">
+                  {{ currentMode }}
+                </div>
               </v-sheet>
 
-              <v-sheet rounded="xl" color="deep-purple" variant="tonal" class="summary-box pa-4">
-                <div class="text-overline">Engine</div>
-                <div class="text-h6 font-weight-bold">Unity</div>
+              <v-sheet
+                rounded="xl"
+                color="deep-purple"
+                variant="tonal"
+                class="summary-box pa-4"
+              >
+                <div class="text-overline">
+                  Engine
+                </div>
+                <div class="text-h6 font-weight-bold">
+                  Unity
+                </div>
               </v-sheet>
             </div>
           </v-card-text>
@@ -628,16 +697,12 @@ onBeforeUnmount(() => {
 }
 
 .step-card-active {
-  border-color: rgba(37, 99, 235, 0.18);
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+  border-color: rgba(37, 99, 235, 0.22);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
 }
 
-.summary-box {
-  min-width: 140px;
-}
-
-.action-cluster {
-  flex-shrink: 0;
+.step-card :deep(.v-card-text) {
+  min-height: 64px;
 }
 
 .steps-compact-list {
@@ -655,13 +720,12 @@ onBeforeUnmount(() => {
   border-radius: 999px;
 }
 
-.step-card :deep(.v-card-text) {
-  min-height: 64px;
+.summary-box {
+  min-width: 140px;
 }
 
-.step-card-active {
-  border-color: rgba(37, 99, 235, 0.22);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+.action-cluster {
+  flex-shrink: 0;
 }
 
 @media (max-width: 960px) {
@@ -690,7 +754,5 @@ onBeforeUnmount(() => {
   .summary-box {
     min-width: calc(50% - 12px);
   }
-
-  
 }
 </style>
