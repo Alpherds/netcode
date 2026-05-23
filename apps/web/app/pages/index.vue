@@ -272,6 +272,8 @@ const goToRj45Simulator = async () => {
   await navigateTo('/simulators/rj45')
 }
 
+//add pc simulator navigation
+
 const goToPcAssemblySimulator = async () => {
   await navigateTo('/simulators/pc-assembly')
 }
