@@ -12,7 +12,6 @@ Library: /Users/alpherdizon/Downloads/pc/PCAssemblySimulator/Temp/BurstOutput/Da
 --float-mode=Fast
 --generate-link-xml=Temp/burst.link.xml
 --temp-folder=/Users/alpherdizon/Downloads/pc/PCAssemblySimulator/Temp/Burst
---debug=Full
 --generate-static-linkage-methods
 --key-folder=/Applications/Unity/Hub/Editor/6000.4.8f1/PlaybackEngines/WebGLSupport
 --decode-folder=/Users/alpherdizon/Downloads/pc/PCAssemblySimulator/Library/Burst
@@ -32,7 +31,6 @@ Library: /Users/alpherdizon/Downloads/pc/PCAssemblySimulator/Temp/BurstOutput/Da
 --target-framework=NetFramework
 --generate-link-xml=Temp/burst.link.xml
 --temp-folder=/Users/alpherdizon/Downloads/pc/PCAssemblySimulator/Temp/Burst
---debug=Full
 --generate-static-linkage-methods
 --key-folder=/Applications/Unity/Hub/Editor/6000.4.8f1/PlaybackEngines/WebGLSupport
 --decode-folder=/Users/alpherdizon/Downloads/pc/PCAssemblySimulator/Library/Burst
