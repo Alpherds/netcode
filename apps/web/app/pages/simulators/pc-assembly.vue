@@ -16,7 +16,6 @@ const unityFrame = ref<HTMLIFrameElement | null>(null)
 
 const currentMode = ref<'Assembly' | 'Disassembly'>('Assembly')
 const currentStep = ref(0)
-const currentStepText = ref('Step 1: Install the motherboard.')
 const warningText = ref('')
 const currentPartId = ref('motherboard')
 
@@ -239,7 +238,6 @@ function setAssemblyMode() {
   currentMode.value = 'Assembly'
   currentStep.value = 0
   currentPartId.value = 'motherboard'
-  currentStepText.value = 'Step 1: Install the motherboard.'
   warningText.value = ''
 
   sendToUnity('SetAssemblyModeFromWeb')
@@ -251,7 +249,6 @@ function setDisassemblyMode() {
   currentMode.value = 'Disassembly'
   currentStep.value = 0
   currentPartId.value = 'gpu'
-  currentStepText.value = 'Step 1: Remove the GPU.'
   warningText.value = ''
 
   sendToUnity('SetDisassemblyModeFromWeb')
@@ -267,7 +264,6 @@ function handleUnityMessage(event: MessageEvent) {
   }
 
   if (data.type === 'UNITY_STEP_UPDATE') {
-    currentStepText.value = data.message
     currentStep.value = Number(data.step ?? 0)
     currentPartId.value = data.partId || ''
   }
@@ -430,6 +426,7 @@ onBeforeUnmount(() => {
                 <div class="text-caption text-medium-emphasis mb-2">
                   Procedure Progress
                 </div>
+
                 <v-progress-linear
                   :model-value="stepProgress"
                   color="primary"
@@ -487,28 +484,6 @@ onBeforeUnmount(() => {
                 {{ moduleStatusText }}
               </v-chip>
             </div>
-
-            <v-sheet
-              rounded="xl"
-              color="surface-variant"
-              class="pa-4 mb-4 current-step-box"
-            >
-              <div class="text-overline text-primary font-weight-bold mb-1">
-                Current Step
-              </div>
-
-              <div class="text-h6 font-weight-bold mb-2">
-                {{
-                  isComplete
-                    ? currentStepData.title
-                    : `${currentStep + 1}. ${currentStepData.title}`
-                }}
-              </div>
-
-              <div class="text-body-2 text-medium-emphasis">
-                {{ currentStepData.description }}
-              </div>
-            </v-sheet>
 
             <v-sheet
               rounded="xl"
@@ -611,20 +586,6 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="text-h6 font-weight-bold">
                   {{ currentMode }}
-                </div>
-              </v-sheet>
-
-              <v-sheet
-                rounded="xl"
-                color="deep-purple"
-                variant="tonal"
-                class="summary-box pa-4"
-              >
-                <div class="text-overline">
-                  Engine
-                </div>
-                <div class="text-h6 font-weight-bold">
-                  Unity
                 </div>
               </v-sheet>
             </div>
