@@ -269,7 +269,7 @@ const handleLogout = async () => {
 }
 
 const goToRj45Simulator = async () => {
-  await navigateTo('/simulators/rj45')
+  await navigateTo('/simulators/rj45-unity.vue')
 }
 
 //add pc simulator navigation
