@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { definePageMeta, navigateTo } from '#imports'
 
 definePageMeta({
@@ -21,32 +21,38 @@ const warningText = ref('')
 const rj45Steps: StepItem[] = [
   {
     title: 'Strip the Cable',
-    description: 'Drag the crimping tool to the cut indicator to remove the cable jacket and reveal the wires.',
+    description:
+      'Drag the crimping tool to the cable cut indicator to remove the cable jacket and reveal the internal wires.',
     partId: 'cable',
   },
   {
     title: 'Arrange the Wires',
-    description: 'Arrange the eight wires in the correct T568B order.',
+    description:
+      'Arrange the eight wires according to the correct T568B wiring order.',
     partId: 'wires',
   },
   {
     title: 'Trim the Wires',
-    description: 'Use the crimping tool to cut the arranged wires evenly before inserting them into the RJ45 plug.',
+    description:
+      'Use the crimping tool to cut the arranged wires evenly before inserting them into the RJ45 plug.',
     partId: 'trim',
   },
   {
     title: 'Insert the RJ45 Plug',
-    description: 'Drag the RJ45 plug toward the aligned wires and insert them properly into the connector.',
+    description:
+      'Drag the RJ45 plug toward the aligned wires and insert the cable properly into the connector.',
     partId: 'plug',
   },
   {
     title: 'Crimp the Connector',
-    description: 'Use the crimping tool to crimp the RJ45 plug and lock the wires in place.',
+    description:
+      'Use the crimping tool to crimp the RJ45 plug and lock the wires in place.',
     partId: 'crimp',
   },
   {
     title: 'Finished Cable',
-    description: 'The RJ45 LAN cable is now assembled and ready for checking.',
+    description:
+      'The RJ45 LAN cable assembly is complete and ready for checking.',
     partId: 'finished',
   },
 ]
@@ -54,27 +60,33 @@ const rj45Steps: StepItem[] = [
 const partDetails: Record<string, { name: string; meaning: string }> = {
   cable: {
     name: 'LAN Cable',
-    meaning: 'The cable jacket protects the internal twisted wires used for network communication.',
+    meaning:
+      'The cable jacket protects the internal wires used for network communication.',
   },
   wires: {
     name: 'T568B Wire Order',
-    meaning: 'The correct order is White/Orange, Orange, White/Green, Blue, White/Blue, Green, White/Brown, and Brown.',
+    meaning:
+      'The correct order is White/Orange, Orange, White/Green, Blue, White/Blue, Green, White/Brown, and Brown.',
   },
   trim: {
     name: 'Wire Trimming',
-    meaning: 'The wires must be straight and evenly cut so they can fit properly inside the RJ45 plug.',
+    meaning:
+      'The wires must be straight and evenly cut so they can fit properly inside the RJ45 plug.',
   },
   plug: {
     name: 'RJ45 Plug',
-    meaning: 'The RJ45 connector holds the arranged wires and connects the cable to network ports.',
+    meaning:
+      'The RJ45 connector holds the arranged wires and connects the cable to network ports.',
   },
   crimp: {
     name: 'Crimping Tool',
-    meaning: 'The crimping tool presses the RJ45 connector pins into the wires to secure the connection.',
+    meaning:
+      'The crimping tool presses the RJ45 connector pins into the wires to secure the connection.',
   },
   finished: {
     name: 'Completed RJ45 Cable',
-    meaning: 'The assembled cable can now be tested for proper wiring and connectivity.',
+    meaning:
+      'The assembled cable can now be tested for proper wiring and connectivity.',
   },
 }
 
@@ -99,10 +111,13 @@ const moduleStatusColor = computed(() => {
 })
 
 const currentPart = computed(() => {
-  return partDetails[currentStepData.value.partId] || {
-    name: 'RJ45 Simulator',
-    meaning: 'Follow the simulator procedure to complete the RJ45 cable assembly.',
-  }
+  return (
+    partDetails[currentStepData.value.partId] || {
+      name: 'RJ45 Simulator',
+      meaning:
+        'Follow the simulator procedure to complete the RJ45 cable assembly.',
+    }
+  )
 })
 
 async function goBack() {
@@ -125,17 +140,34 @@ function openFullscreen() {
   }
 }
 
-function nextGuideStep() {
-  if (currentStep.value < rj45Steps.length - 1) {
-    currentStep.value++
+function handleUnityMessage(event: MessageEvent) {
+  const data = event.data
+
+  if (!data || data.source !== 'unity-rj45-simulator') return
+
+  if (data.type === 'UNITY_STEP_UPDATE') {
+    currentStep.value = Number(data.step ?? 0)
+    warningText.value = ''
+
+    console.log('RJ45 Unity step update:', data)
+  }
+
+  if (data.type === 'UNITY_WARNING') {
+    warningText.value = data.message || ''
+  }
+
+  if (data.type === 'UNITY_CLEAR_WARNING') {
+    warningText.value = ''
   }
 }
 
-function previousGuideStep() {
-  if (currentStep.value > 0) {
-    currentStep.value--
-  }
-}
+onMounted(() => {
+  window.addEventListener('message', handleUnityMessage)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('message', handleUnityMessage)
+})
 </script>
 
 <template>
@@ -191,7 +223,8 @@ function previousGuideStep() {
             <p class="text-body-1 text-medium-emphasis mb-0">
               Practice the proper RJ45 cable assembly process through a guided
               Unity WebGL simulator. Follow each step from stripping the cable,
-              arranging the wires, trimming, inserting the plug, and crimping the connector.
+              arranging the wires, trimming, inserting the plug, and crimping
+              the connector.
             </p>
           </div>
 
@@ -233,8 +266,8 @@ function previousGuideStep() {
           variant="tonal"
           class="mt-5"
         >
-          Drag the correct object in the Unity workspace. Use the procedure guide
-          on the right as your step-by-step reference.
+          Drag the correct object in the Unity workspace. The procedure guide
+          will update automatically when the Unity simulator sends step updates.
         </v-alert>
       </v-card-text>
     </v-card>
@@ -285,25 +318,13 @@ function previousGuideStep() {
 
               <div class="d-flex flex-wrap ga-2 action-cluster">
                 <v-btn
-                  color="grey-darken-1"
-                  variant="outlined"
-                  rounded="pill"
-                  prepend-icon="mdi-chevron-left"
-                  :disabled="currentStep === 0"
-                  @click="previousGuideStep"
-                >
-                  Previous
-                </v-btn>
-
-                <v-btn
                   color="primary"
                   variant="tonal"
                   rounded="pill"
-                  prepend-icon="mdi-chevron-right"
-                  :disabled="currentStep >= rj45Steps.length - 1"
-                  @click="nextGuideStep"
+                  prepend-icon="mdi-refresh"
+                  @click="reloadSimulator"
                 >
-                  Next Guide
+                  Reload
                 </v-btn>
 
                 <v-btn
@@ -416,7 +437,8 @@ function previousGuideStep() {
             </div>
 
             <v-alert type="success" variant="tonal" class="mb-3">
-              This simulator helps students practice the correct RJ45 cable assembly sequence.
+              This simulator helps students practice the correct RJ45 cable
+              assembly sequence using the T568B standard.
             </v-alert>
 
             <div class="d-flex flex-wrap ga-3">
@@ -488,7 +510,7 @@ function previousGuideStep() {
 }
 
 .simulator-canvas-shell {
-  height: 620px;
+  height: 720px;
   border-radius: 20px;
   overflow: hidden;
   background: #111827;
@@ -501,6 +523,7 @@ function previousGuideStep() {
   border: none;
   display: block;
   background: #111827;
+  overflow: hidden;
 }
 
 .current-step-box {
