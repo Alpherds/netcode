@@ -510,7 +510,7 @@ onBeforeUnmount(() => {
 }
 
 .simulator-canvas-shell {
-  height: 720px;
+  height: 620px;
   border-radius: 20px;
   overflow: hidden;
   background: #111827;
